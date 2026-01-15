@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: docker.io/library/postgres:14-alpine
+    container_name: bcscan-postgres
+    environment:
+      POSTGRES_USER: bcscan
+      POSTGRES_PASSWORD: bcscan_password
+      POSTGRES_DB: bcscan
+    ports:
+      - "5432:5432"
+    volumes:
+      - ../data/postgres:/var/lib/postgresql/data
+      - ../backend/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bcscan"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis 缓存
+  redis:
+    image: docker.io/library/redis:7-alpine
+    container_name: bcscan-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - ../data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # Redpanda 消息队列
+  redpanda:
+    image: docker.io/redpandadata/redpanda:latest
+    container_name: bcscan-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --node-id 0
+      - --kafka-addr PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://redpanda:9092
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    volumes:
+      - ../data/redpanda:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Ganache 以太坊测试网络
+  ganache:
+    image: docker.io/trufflesuite/ganache:latest
+    container_name: bcscan-ganache
+    ports:
+      - "8545:8545"
+    restart: unless-stopped

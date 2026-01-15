@@ -1,0 +1,59 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# Backend binaries
+backend/cmd/*/ums
+backend/cmd/*/rms
+backend/cmd/*/rds
+backend/cmd/*/rgs
+backend/cmd/*/as
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Frontend build
+frontend/build/
+frontend/dist/
+frontend/.next/
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data
+data/postgres/*
+data/redis/*
+data/redpanda/*
+!data/*/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# Temporary
+tmp/
+temp/
