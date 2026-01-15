@@ -48,6 +48,7 @@ type Config struct {
 	KafkaBroker string
 	KafkaTopic  string
 	RulesPath   string
+	RedisAddr   string
 }
 
 // loadConfig 加载配置
@@ -57,6 +58,7 @@ func loadConfig() *Config {
 		KafkaBroker: getEnv("KAFKA_BROKER", "localhost:9092"),
 		KafkaTopic:  getEnv("KAFKA_TOPIC", "blockchain.transactions"),
 		RulesPath:   getEnv("RULES_PATH", "./rules/builtin"),
+		RedisAddr:   getEnv("REDIS_ADDR", "localhost:6379"),
 	}
 }
 

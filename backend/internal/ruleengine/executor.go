@@ -1,21 +1,28 @@
 package ruleengine
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
-	"log"
 	"strings"
+	"time"
+
+	"github.com/haswell/bcscan/internal/models"
+	"github.com/haswell/bcscan/internal/repository"
+	"go.uber.org/zap"
 )
 
 // Executor 动作执行器
 type Executor struct {
-	db *sql.DB
+	repo   *repository.RiskEventRepository
+	logger *zap.Logger
 }
 
 // NewExecutor 创建新的执行器
-func NewExecutor(db *sql.DB) *Executor {
+func NewExecutor(repo *repository.RiskEventRepository) *Executor {
+	logger, _ := zap.NewProduction()
 	return &Executor{
-		db: db,
+		repo:   repo,
+		logger: logger,
 	}
 }
 
@@ -23,8 +30,9 @@ func NewExecutor(db *sql.DB) *Executor {
 func (e *Executor) Execute(rule *Rule, ctx *EvaluationContext, score int) error {
 	for _, action := range rule.Actions {
 		if err := e.executeAction(action, rule, ctx, score); err != nil {
-			log.Printf("[ERROR] Failed to execute action %s: %v", action.Type, err)
-			// 继续执行其他动作，不中断
+			e.logger.Error("Failed to execute action",
+				zap.String("action", action.Type),
+				zap.Error(err))
 		}
 	}
 	return nil
@@ -38,27 +46,28 @@ func (e *Executor) executeAction(action RuleAction, rule *Rule, ctx *EvaluationC
 	case "log_risk_event":
 		return e.logRiskEvent(action, rule, ctx, score)
 	default:
-		log.Printf("[WARN] Unknown action type: %s", action.Type)
+		e.logger.Warn("Unknown action type", zap.String("type", action.Type))
 		return nil
 	}
 }
 
 // executeAlert 执行告警动作
 func (e *Executor) executeAlert(action RuleAction, rule *Rule, ctx *EvaluationContext, score int) error {
-	// 替换消息模板中的变量
 	message := e.replaceVariables(action.Message, ctx)
 	title := e.replaceVariables(action.Title, ctx)
 
-	log.Printf("[ALERT] %s - %s (Score: %d)", title, message, score)
+	e.logger.Info("ALERT",
+		zap.String("title", title),
+		zap.String("message", message),
+		zap.Int("score", score))
 
-	// TODO: 发送到告警服务
 	return nil
 }
 
 // logRiskEvent 记录风险事件到数据库
 func (e *Executor) logRiskEvent(action RuleAction, rule *Rule, ctx *EvaluationContext, score int) error {
-	if e.db == nil {
-		return fmt.Errorf("database connection is nil")
+	if e.repo == nil {
+		return fmt.Errorf("repository is nil")
 	}
 
 	var txHash string
@@ -69,21 +78,17 @@ func (e *Executor) logRiskEvent(action RuleAction, rule *Rule, ctx *EvaluationCo
 		contractAddr = ctx.Transaction.ToAddress
 	}
 
-	query := `
-		INSERT INTO risk_events (event_type, severity, contract_address, tx_hash, description, score, detected_at)
-		VALUES ($1, $2, $3, $4, $5, $6, NOW())
-	`
+	event := &models.RiskEvent{
+		EventType:       rule.Metadata.Name,
+		Severity:        rule.Config.Severity,
+		ContractAddress: contractAddr,
+		TxHash:          txHash,
+		Description:     rule.Metadata.Description,
+		Score:           score,
+		DetectedAt:      time.Now(),
+	}
 
-	_, err := e.db.Exec(query,
-		rule.Metadata.Name,
-		rule.Config.Severity,
-		contractAddr,
-		txHash,
-		rule.Metadata.Description,
-		score,
-	)
-
-	return err
+	return e.repo.Create(context.Background(), event)
 }
 
 // replaceVariables 替换消息模板中的变量

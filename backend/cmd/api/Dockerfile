@@ -8,16 +8,16 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 go build -o build/rms ./cmd/rms
+RUN CGO_ENABLED=0 go build -o build/api ./cmd/api
 
 # Runtime stage
 FROM alpine:latest
 
 WORKDIR /app
 
-COPY --from=builder /build/build/rms .
+COPY --from=builder /build/build/api .
 
-RUN adduser -D -u 1000 rms && chown -R rms:rms /app
-USER rms
+RUN adduser -D -u 1000 api && chown -R api:api /app
+USER api
 
-ENTRYPOINT ["./rms"]
+ENTRYPOINT ["./api"]

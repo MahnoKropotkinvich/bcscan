@@ -11,7 +11,7 @@ RUN go mod download
 COPY . .
 
 # Build RDS binary
-RUN CGO_ENABLED=0 go build -o rds ./cmd/rds
+RUN CGO_ENABLED=0 go build -o build/rds ./cmd/rds
 
 # Runtime stage
 FROM alpine:latest
@@ -19,7 +19,7 @@ FROM alpine:latest
 WORKDIR /app
 
 # Copy binary and rules
-COPY --from=builder /build/rds .
+COPY --from=builder /build/build/rds .
 COPY --from=builder /build/rules ./rules
 
 # Run as non-root

@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 
+	"github.com/haswell/bcscan/internal/cache"
 	"github.com/haswell/bcscan/internal/kafka"
 	"github.com/haswell/bcscan/internal/models"
+	"github.com/haswell/bcscan/internal/repository"
 	"github.com/haswell/bcscan/internal/ruleengine"
 	"github.com/haswell/bcscan/internal/ruleengine/hooks"
 	kafkago "github.com/segmentio/kafka-go"
@@ -20,7 +22,7 @@ type RDSService struct {
 	logger        *zap.Logger
 	kafkaConsumer *kafka.Consumer
 	hookManager   *hooks.Manager
-	rules         []*ruleengine.Rule
+	ruleManager   *ruleengine.RuleManager
 	scorer        *ruleengine.Scorer
 	executor      *ruleengine.Executor
 	running       bool
@@ -28,13 +30,16 @@ type RDSService struct {
 
 // NewRDSService 创建新的 RDS 服务
 func NewRDSService(db *sql.DB, cfg *Config, logger *zap.Logger) *RDSService {
+	redis := cache.NewRedisClient(cfg.RedisAddr)
+	repo := repository.NewRiskEventRepository(db, redis, logger)
 	return &RDSService{
 		db:          db,
 		cfg:         cfg,
 		logger:      logger,
 		hookManager: hooks.NewManager(),
+		ruleManager: ruleengine.NewRuleManager(cfg.RulesPath, redis, logger),
 		scorer:      ruleengine.NewScorer(),
-		executor:    ruleengine.NewExecutor(db),
+		executor:    ruleengine.NewExecutor(repo),
 		running:     false,
 	}
 }
@@ -59,13 +64,16 @@ func (s *RDSService) Start() error {
 		s.logger,
 	)
 
-	// 4. 启动消息处理
+	// 4. 启动规则热加载
+	go s.ruleManager.SubscribeUpdates(context.Background())
+
+	// 5. 启动消息处理
 	go s.processMessages()
 
-	// 5. 标记为运行中
+	// 6. 标记为运行中
 	s.running = true
 
-	s.logger.Info("Service started successfully", zap.Int("rules", len(s.rules)))
+	s.logger.Info("Service started successfully", zap.Int("rules", len(s.ruleManager.GetRules())))
 	return nil
 }
 
@@ -79,15 +87,12 @@ func (s *RDSService) Stop() {
 func (s *RDSService) loadRules() error {
 	s.logger.Info("Loading rules", zap.String("path", s.cfg.RulesPath))
 
-	loader := ruleengine.NewRuleLoader(s.cfg.RulesPath, s.logger)
-
-	if err := loader.LoadAll(); err != nil {
+	ctx := context.Background()
+	if err := s.ruleManager.LoadRules(ctx); err != nil {
 		return err
 	}
 
-	// 获取启用的规则
-	s.rules = loader.GetEnabledRules()
-	s.logger.Info("Rules loaded", zap.Int("enabled_rules", len(s.rules)))
+	s.logger.Info("Rules loaded", zap.Int("enabled_rules", len(s.ruleManager.GetRules())))
 	return nil
 }
 
@@ -158,7 +163,8 @@ func (s *RDSService) processTransaction(msg *kafkago.Message) error {
 	}
 
 	// 4. 触发 hook
-	events, err := s.hookManager.Trigger("contract_function_call", ctx, s.rules)
+	rules := s.ruleManager.GetRules()
+	events, err := s.hookManager.Trigger("contract_function_call", ctx, rules)
 	if err != nil {
 		return err
 	}
@@ -166,7 +172,7 @@ func (s *RDSService) processTransaction(msg *kafkago.Message) error {
 	// 5. 处理风险事件
 	for _, event := range events {
 		var matchedRule *ruleengine.Rule
-		for _, rule := range s.rules {
+		for _, rule := range rules {
 			if rule.Metadata.Name == event.RuleID {
 				matchedRule = rule
 				break

@@ -82,8 +82,11 @@ services:
       KAFKA_BROKER: redpanda:9092
       KAFKA_TOPIC: blockchain.transactions
       RULES_PATH: /app/rules/builtin
+      REDIS_ADDR: redis:6379
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       redpanda:
         condition: service_healthy
@@ -103,6 +106,26 @@ services:
       ganache:
         condition: service_started
       redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # API Gateway
+  api:
+    build:
+      context: ../backend
+      dockerfile: cmd/api/Dockerfile
+    container_name: bcscan-api
+    environment:
+      DATABASE_URL: postgres://bcscan:bcscan_password@postgres:5432/bcscan?sslmode=disable
+      PORT: "8080"
+      REDIS_ADDR: redis:6379
+      RULES_PATH: /app/rules/builtin
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 
