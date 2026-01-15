@@ -37,6 +37,7 @@ type RedisConfig struct {
 
 type KafkaConfig struct {
 	Brokers []string
+	Topic   string
 }
 
 type EthereumConfig struct {

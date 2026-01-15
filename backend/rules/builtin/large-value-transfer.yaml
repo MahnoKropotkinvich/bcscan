@@ -1,0 +1,44 @@
+metadata:
+  name: "large-value-transfer"
+  version: "1.0.0"
+  author: "security-team"
+  description: "检测大额转账交易"
+  tags: ["transfer", "high", "monitoring"]
+  enabled: true
+  created_at: "2026-01-15T10:00:00Z"
+  updated_at: "2026-01-15T10:00:00Z"
+
+config:
+  severity: "high"
+  priority: 50
+  throttle:
+    enabled: false
+  hooks:
+    - "contract_function_call"
+
+triggers:
+  operator: "AND"
+  conditions:
+    - type: "value"
+      operator: ">"
+      value: 1000000000000000000  # > 1 ETH
+      description: "转账金额超过 1 ETH"
+
+scoring:
+  base_score: 60
+  factors:
+    - condition: "value > 10000000000000000000"  # > 10 ETH
+      score: 20
+      description: "超大额转账"
+    - condition: "call_depth > 3"
+      score: 10
+      description: "复杂调用链"
+
+actions:
+  - type: "alert"
+    severity: "high"
+    title: "检测到大额转账"
+    message: "交易 {{tx_hash}} 转账金额: {{value}} wei"
+  
+  - type: "log_risk_event"
+    severity: "high"

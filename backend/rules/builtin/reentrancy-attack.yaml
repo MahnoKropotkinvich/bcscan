@@ -1,0 +1,83 @@
+metadata:
+  name: "reentrancy-attack-detection"
+  version: "2.0.0"
+  author: "security-team"
+  description: "检测重入攻击模式 - 基于调用栈分析"
+  tags: ["reentrancy", "critical", "defi"]
+  enabled: true
+  created_at: "2024-01-15T10:00:00Z"
+  updated_at: "2026-01-15T10:00:00Z"
+
+config:
+  severity: "critical"
+  priority: 100
+  throttle:
+    enabled: true
+    max_alerts: 10
+    time_window: "5m"
+  hooks:
+    - "contract_function_call"  # 监听合约函数调用
+
+triggers:
+  operator: "OR"
+  conditions:
+    # 条件1: 检测到重入模式
+    - type: "reentrancy_detected"
+      operator: "=="
+      value: true
+      description: "调用栈中检测到重入模式 (A->B->A)"
+    
+    # 条件2: 调用深度异常
+    - type: "call_depth"
+      operator: ">"
+      value: 5
+      description: "调用深度超过5层"
+
+extract:
+  transaction:
+    - field: "hash"
+      as: "tx_hash"
+    - field: "from"
+      as: "attacker_address"
+    - field: "to"
+      as: "target_contract"
+  
+  call_stack:
+    - field: "depth"
+      as: "max_call_depth"
+    - field: "count"
+      as: "call_count"
+
+scoring:
+  base_score: 85
+  factors:
+    - condition: "call_depth > 7"
+      score: 10
+      description: "调用深度过深"
+    - condition: "call_count > 5"
+      score: 5
+      description: "调用次数过多"
+
+actions:
+  - type: "alert"
+    severity: "critical"
+    title: "检测到疑似重入攻击"
+    message: |
+      在交易 {{tx_hash}} 中检测到疑似重入攻击模式：
+      - 攻击者地址: {{attacker_address}}
+      - 目标合约: {{target_contract}}
+      - 调用深度: {{max_call_depth}}
+      - 调用次数: {{call_count}}
+    metadata:
+      attack_type: "reentrancy"
+  
+  - type: "log_risk_event"
+    severity: "critical"
+
+filters:
+  whitelist:
+    contracts: []
+    addresses: []
+  blacklist:
+    contracts: []
+    addresses: []

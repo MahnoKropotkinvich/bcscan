@@ -70,3 +70,42 @@ services:
     ports:
       - "8545:8545"
     restart: unless-stopped
+
+  # RDS 风险检测服务
+  rds:
+    build:
+      context: ../backend
+      dockerfile: cmd/rds/Dockerfile
+    container_name: bcscan-rds
+    environment:
+      DATABASE_URL: postgres://bcscan:bcscan_password@postgres:5432/bcscan?sslmode=disable
+      KAFKA_BROKER: redpanda:9092
+      KAFKA_TOPIC: blockchain.transactions
+      RULES_PATH: /app/rules/builtin
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # RMS 运行时监控服务
+  rms:
+    build:
+      context: ../backend
+      dockerfile: cmd/rms/Dockerfile
+    container_name: bcscan-rms
+    environment:
+      ETH_NODE_URL: ws://ganache:8545
+      KAFKA_BROKER: redpanda:9092
+      KAFKA_TOPIC: blockchain.transactions
+    depends_on:
+      ganache:
+        condition: service_started
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  default:
+    name: bcscan
