@@ -14,42 +14,63 @@ interface RiskEvent {
   description: string;
 }
 
+const EVENT_TYPES = [
+  { type: 'reentrancy-attack', desc: '检测到疑似重入攻击', severity: ['critical', 'high'] },
+  { type: 'large-value-transfer', desc: '检测到大额转账', severity: ['high', 'medium'] },
+  { type: 'abnormal-gas', desc: '异常Gas消耗', severity: ['medium', 'high'] },
+  { type: 'permission-abuse', desc: '权限滥用检测', severity: ['critical', 'high'] },
+];
+
+const generateTxHash = () => '0x' + Math.random().toString(16).substr(2, 40);
+const formatTime = (date: Date) => date.toISOString().replace('T', ' ').substr(0, 19);
+
 const RiskEvents: React.FC = () => {
   const [events, setEvents] = useState<RiskEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<string>('all');
 
   useEffect(() => {
-    // Mock data - 后续替换为 API 调用
-    setEvents([
-      {
-        id: 1,
-        event_type: 'reentrancy-attack-detection',
-        severity: 'critical',
-        tx_hash: '0xabc123def456...',
-        score: 95,
-        detected_at: '2026-01-15 19:30:00',
-        description: '检测到疑似重入攻击'
-      },
-      {
-        id: 2,
-        event_type: 'large-value-transfer',
-        severity: 'high',
-        tx_hash: '0xdef456abc789...',
-        score: 75,
-        detected_at: '2026-01-15 19:25:00',
-        description: '检测到大额转账'
-      },
-      {
-        id: 3,
-        event_type: 'reentrancy-attack-detection',
-        severity: 'critical',
-        tx_hash: '0x789abc123def...',
-        score: 100,
-        detected_at: '2026-01-15 19:20:00',
-        description: '检测到疑似重入攻击'
-      },
-    ]);
+    // TODO: MOCK DATA - 后期替换为真实 API 调用
+    // 初始化数据
+    const initialEvents = Array.from({ length: 8 }, (_, i) => {
+      const eventType = EVENT_TYPES[Math.floor(Math.random() * EVENT_TYPES.length)];
+      const severity = eventType.severity[Math.floor(Math.random() * eventType.severity.length)];
+      const baseScore = severity === 'critical' ? 85 : severity === 'high' ? 65 : 45;
+      
+      return {
+        id: 1000 + i,
+        event_type: eventType.type,
+        severity,
+        tx_hash: generateTxHash(),
+        score: baseScore + Math.floor(Math.random() * 15),
+        detected_at: formatTime(new Date(Date.now() - Math.random() * 3600000)),
+        description: eventType.desc,
+      };
+    });
+    setEvents(initialEvents.sort((a, b) => b.id - a.id));
+
+    // TODO: MOCK DATA - 每5秒添加新事件，后期替换为 WebSocket 或轮询
+    const interval = setInterval(() => {
+      const eventType = EVENT_TYPES[Math.floor(Math.random() * EVENT_TYPES.length)];
+      const severity = eventType.severity[Math.floor(Math.random() * eventType.severity.length)];
+      const baseScore = severity === 'critical' ? 85 : severity === 'high' ? 65 : 45;
+
+      setEvents(prev => {
+        const newEvent = {
+          id: Date.now(),
+          event_type: eventType.type,
+          severity,
+          tx_hash: generateTxHash(),
+          score: baseScore + Math.floor(Math.random() * 15),
+          detected_at: formatTime(new Date()),
+          description: eventType.desc,
+        };
+        console.log('[RiskEvents] 新事件:', newEvent.event_type, newEvent.severity);
+        return [newEvent, ...prev.slice(0, 19)];
+      });
+    }, 5000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const columns = [

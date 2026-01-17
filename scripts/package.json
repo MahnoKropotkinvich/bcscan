@@ -1,0 +1,11 @@
+{
+  "name": "bcscan-scripts",
+  "version": "1.0.0",
+  "description": "BCScan test scripts",
+  "scripts": {
+    "generate-events": "node generate-risk-events.js"
+  },
+  "dependencies": {
+    "web3": "^4.3.0"
+  }
+}
