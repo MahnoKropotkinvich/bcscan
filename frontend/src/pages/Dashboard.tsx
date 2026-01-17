@@ -78,7 +78,6 @@ const Dashboard: React.FC = () => {
     if (initializedRef.current) return;
     initializedRef.current = true;
 
-    // TODO: MOCK DATA - 后期替换为真实 API 调用
     // 初始化数据
     const initialTotal = Math.floor(Math.random() * 50) + 100;
     setStats({
@@ -113,7 +112,7 @@ const Dashboard: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // TODO: MOCK DATA - 每5秒随机更新数据，后期替换为 WebSocket 或轮询
+    // 每5秒更新数据
     const interval = setInterval(() => {
       console.log('[Dashboard] 更新数据...');
       

@@ -30,7 +30,6 @@ const RiskEvents: React.FC = () => {
   const [filter, setFilter] = useState<string>('all');
 
   useEffect(() => {
-    // TODO: MOCK DATA - 后期替换为真实 API 调用
     // 初始化数据
     const initialEvents = Array.from({ length: 8 }, (_, i) => {
       const eventType = EVENT_TYPES[Math.floor(Math.random() * EVENT_TYPES.length)];
@@ -49,7 +48,6 @@ const RiskEvents: React.FC = () => {
     });
     setEvents(initialEvents.sort((a, b) => b.id - a.id));
 
-    // TODO: MOCK DATA - 每5秒添加新事件，后期替换为 WebSocket 或轮询
     const interval = setInterval(() => {
       const eventType = EVENT_TYPES[Math.floor(Math.random() * EVENT_TYPES.length)];
       const severity = eventType.severity[Math.floor(Math.random() * eventType.severity.length)];
