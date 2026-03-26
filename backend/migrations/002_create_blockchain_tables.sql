@@ -11,9 +11,9 @@ CREATE TABLE IF NOT EXISTS monitored_contracts (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_contracts_address ON monitored_contracts(address);
-CREATE INDEX idx_contracts_chain_id ON monitored_contracts(chain_id);
-CREATE INDEX idx_contracts_status ON monitored_contracts(status);
+CREATE INDEX IF NOT EXISTS idx_contracts_address ON monitored_contracts(address);
+CREATE INDEX IF NOT EXISTS idx_contracts_chain_id ON monitored_contracts(chain_id);
+CREATE INDEX IF NOT EXISTS idx_contracts_status ON monitored_contracts(status);
 
 -- 区块表
 CREATE TABLE IF NOT EXISTS blocks (
@@ -29,14 +29,14 @@ CREATE TABLE IF NOT EXISTS blocks (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_blocks_number ON blocks(block_number DESC);
-CREATE INDEX idx_blocks_hash ON blocks(block_hash);
-CREATE INDEX idx_blocks_timestamp ON blocks(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_blocks_number ON blocks(block_number DESC);
+CREATE INDEX IF NOT EXISTS idx_blocks_hash ON blocks(block_hash);
+CREATE INDEX IF NOT EXISTS idx_blocks_timestamp ON blocks(timestamp DESC);
 
 -- 交易表（分区表，按月分区）
 CREATE TABLE IF NOT EXISTS transactions (
     id BIGSERIAL,
-    tx_hash VARCHAR(66) UNIQUE NOT NULL,
+    tx_hash VARCHAR(66) NOT NULL,
     block_number BIGINT NOT NULL,
     from_address VARCHAR(42) NOT NULL,
     to_address VARCHAR(42),
@@ -50,12 +50,16 @@ CREATE TABLE IF NOT EXISTS transactions (
     PRIMARY KEY (id, timestamp)
 ) PARTITION BY RANGE (timestamp);
 
-CREATE INDEX idx_transactions_hash ON transactions(tx_hash);
-CREATE INDEX idx_transactions_block ON transactions(block_number);
-CREATE INDEX idx_transactions_from ON transactions(from_address);
-CREATE INDEX idx_transactions_to ON transactions(to_address);
-CREATE INDEX idx_transactions_timestamp ON transactions(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_transactions_hash ON transactions(tx_hash);
+CREATE INDEX IF NOT EXISTS idx_transactions_block ON transactions(block_number);
+CREATE INDEX IF NOT EXISTS idx_transactions_from ON transactions(from_address);
+CREATE INDEX IF NOT EXISTS idx_transactions_to ON transactions(to_address);
+CREATE INDEX IF NOT EXISTS idx_transactions_timestamp ON transactions(timestamp DESC);
 
--- 创建初始分区（当前月份）
+-- 创建分区（覆盖 2024-2027）
 CREATE TABLE IF NOT EXISTS transactions_2024_01 PARTITION OF transactions
-    FOR VALUES FROM ('2024-01-01') TO ('2024-02-01');
+    FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+CREATE TABLE IF NOT EXISTS transactions_2025_01 PARTITION OF transactions
+    FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
+CREATE TABLE IF NOT EXISTS transactions_2026_01 PARTITION OF transactions
+    FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');

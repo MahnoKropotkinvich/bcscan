@@ -4,13 +4,18 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/haswell/bcscan/internal/cache"
 	"github.com/haswell/bcscan/internal/kafka"
 	"github.com/haswell/bcscan/internal/models"
+	"github.com/haswell/bcscan/internal/profile"
 	"github.com/haswell/bcscan/internal/repository"
 	"github.com/haswell/bcscan/internal/ruleengine"
 	"github.com/haswell/bcscan/internal/ruleengine/hooks"
+	"github.com/haswell/bcscan/internal/types"
 	kafkago "github.com/segmentio/kafka-go"
 	"go.uber.org/zap"
 )
@@ -20,12 +25,18 @@ type RDSService struct {
 	db            *sql.DB
 	cfg           *Config
 	logger        *zap.Logger
+	redis         *cache.RedisClient
 	kafkaConsumer *kafka.Consumer
 	hookManager   *hooks.Manager
 	ruleManager   *ruleengine.RuleManager
 	scorer        *ruleengine.Scorer
 	executor      *ruleengine.Executor
-	running       bool
+	riskRepo      *repository.RiskEventRepository
+	// 新增：跨交易上下文分析
+	tracker      *profile.Tracker           // 地址行为追踪器
+	privRegistry *profile.PrivilegeRegistry // 权限注册表
+	running      atomic.Bool
+	cancel       context.CancelFunc
 }
 
 // NewRDSService 创建新的 RDS 服务
@@ -33,14 +44,17 @@ func NewRDSService(db *sql.DB, cfg *Config, logger *zap.Logger) *RDSService {
 	redis := cache.NewRedisClient(cfg.RedisAddr)
 	repo := repository.NewRiskEventRepository(db, redis, logger)
 	return &RDSService{
-		db:          db,
-		cfg:         cfg,
-		logger:      logger,
-		hookManager: hooks.NewManager(),
-		ruleManager: ruleengine.NewRuleManager(cfg.RulesPath, redis, logger),
-		scorer:      ruleengine.NewScorer(),
-		executor:    ruleengine.NewExecutor(repo),
-		running:     false,
+		db:           db,
+		cfg:          cfg,
+		logger:       logger,
+		redis:        redis,
+		hookManager:  hooks.NewManager(),
+		ruleManager:  ruleengine.NewRuleManager(cfg.RulesPath, redis, logger),
+		scorer:       ruleengine.NewScorer(),
+		executor:     ruleengine.NewExecutor(repo, logger),
+		riskRepo:     repo,
+		tracker:      profile.NewTracker(cfg.RedisAddr, logger),
+		privRegistry: profile.NewPrivilegeRegistry(db, logger),
 	}
 }
 
@@ -53,10 +67,16 @@ func (s *RDSService) Start() error {
 		return err
 	}
 
-	// 2. 注册钩子
+	// 2. 加载权限注册表
+	ctx := context.Background()
+	if err := s.privRegistry.Load(ctx); err != nil {
+		s.logger.Warn("Failed to load privilege registry (will retry)", zap.Error(err))
+	}
+
+	// 3. 注册钩子
 	s.registerHooks()
 
-	// 3. 初始化 Kafka 消费者
+	// 4. 初始化 Kafka 消费者
 	s.kafkaConsumer = kafka.NewConsumer(
 		[]string{s.cfg.KafkaBroker},
 		s.cfg.KafkaTopic,
@@ -64,22 +84,56 @@ func (s *RDSService) Start() error {
 		s.logger,
 	)
 
-	// 4. 启动规则热加载
-	go s.ruleManager.SubscribeUpdates(context.Background())
+	// 5. 创建可取消的上下文
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
 
-	// 5. 启动消息处理
-	go s.processMessages()
+	// 6. 启动规则热加载
+	go s.ruleManager.SubscribeUpdates(ctx)
 
-	// 6. 标记为运行中
-	s.running = true
+	// 7. 启动权限表定期重载（每 5 分钟）
+	go s.privRegistry.PeriodicReload(ctx, 5*time.Minute)
 
-	s.logger.Info("Service started successfully", zap.Int("rules", len(s.ruleManager.GetRules())))
+	// 8. 启动消息处理
+	s.running.Store(true)
+	go s.processMessages(ctx)
+
+	s.logger.Info("Service started successfully",
+		zap.Int("rules", len(s.ruleManager.GetRules())),
+		zap.String("features", "profile_tracking,privilege_checking"))
 	return nil
 }
 
 // Stop 停止服务
 func (s *RDSService) Stop() {
-	s.running = false
+	s.logger.Info("Stopping service...")
+	s.running.Store(false)
+
+	// 取消上下文，通知所有 goroutine
+	if s.cancel != nil {
+		s.cancel()
+	}
+
+	// 关闭 Kafka 消费者
+	if s.kafkaConsumer != nil {
+		s.kafkaConsumer.Close()
+	}
+
+	// 关闭 RiskEvent 仓储的写入 worker
+	if s.riskRepo != nil {
+		s.riskRepo.Close()
+	}
+
+	// 关闭行为追踪器
+	if s.tracker != nil {
+		s.tracker.Close()
+	}
+
+	// 关闭 Redis
+	if s.redis != nil {
+		s.redis.Close()
+	}
+
 	s.logger.Info("Service stopped")
 }
 
@@ -98,42 +152,41 @@ func (s *RDSService) loadRules() error {
 
 // registerHooks 注册钩子
 func (s *RDSService) registerHooks() {
-	// 注册合约函数调用钩子
 	contractFunctionHook := hooks.NewContractFunctionHook()
 	s.hookManager.Register(contractFunctionHook)
-
 	s.logger.Info("Registered hooks", zap.String("hooks", "contract_function_call"))
 }
 
 // processMessages 处理 Kafka 消息
-func (s *RDSService) processMessages() {
-	ctx := context.Background()
-
+func (s *RDSService) processMessages(ctx context.Context) {
 	s.logger.Info("Starting message processing...")
 
-	for s.running {
+	for s.running.Load() {
 		msg, err := s.kafkaConsumer.ReadMessage(ctx)
 		if err != nil {
+			if ctx.Err() != nil {
+				s.logger.Info("Message processing stopped: context cancelled")
+				return
+			}
 			s.logger.Error("Failed to read message", zap.Error(err))
 			continue
 		}
 
-		// 处理交易消息
-		if err := s.processTransaction(&msg); err != nil {
+		if err := s.processTransaction(ctx, &msg); err != nil {
 			s.logger.Error("Failed to process transaction", zap.Error(err))
 		}
 	}
 }
 
 // processTransaction 处理单个交易
-func (s *RDSService) processTransaction(msg *kafkago.Message) error {
-	// 1. 解析消息为交易数据（新格式，包含调用栈）
-	var txData hooks.TransactionData
+func (s *RDSService) processTransaction(ctx context.Context, msg *kafkago.Message) error {
+	// 1. 解析消息为交易数据
+	var txData types.TransactionData
 	if err := json.Unmarshal(msg.Value, &txData); err != nil {
 		return err
 	}
 
-	// 2. 转换为 models.Transaction（用于兼容）
+	// 2. 转换为 models.Transaction（用于评估上下文）
 	tx := &models.Transaction{
 		TxHash:      txData.TxHash,
 		BlockNumber: int64(txData.BlockNumber),
@@ -146,30 +199,122 @@ func (s *RDSService) processTransaction(msg *kafkago.Message) error {
 	}
 
 	// 3. 创建评估上下文并填充运行时数据
-	ctx := ruleengine.NewEvaluationContext(tx, nil)
-	ctx.CallDepth = hooks.CalculateMaxCallDepth(txData.CallStack)
-	ctx.CallCount = len(txData.CallStack)
-	ctx.GasUsed = txData.GasUsed
-	ctx.GasLimit = txData.GasLimit
+	evalCtx := ruleengine.NewEvaluationContext(tx, nil)
+	evalCtx.CallDepth = types.CalculateMaxCallDepth(txData.CallStack)
+	evalCtx.CallCount = len(txData.CallStack)
+	evalCtx.GasUsed = txData.GasUsed
+	evalCtx.GasLimit = txData.GasLimit
 
 	// 填充调用轨迹
 	for _, frame := range txData.CallStack {
-		ctx.CallTrace = append(ctx.CallTrace, frame.To)
+		evalCtx.CallTrace = append(evalCtx.CallTrace, frame.To)
 	}
 
 	// 检测重入模式
-	if hooks.DetectReentrancyPattern(txData.CallStack) {
-		ctx.ExtractedData["reentrancy_detected"] = true
+	if types.DetectReentrancyPattern(txData.CallStack) {
+		evalCtx.ExtractedData["reentrancy_detected"] = true
 	}
 
-	// 4. 触发 hook
+	// ====== 4. 跨交易上下文分析 ======
+
+	// 4a. 记录交互事件到行为追踪器
+	hasDelegatecall := false
+	for _, frame := range txData.CallStack {
+		if strings.EqualFold(frame.Type, "DELEGATECALL") {
+			hasDelegatecall = true
+			break
+		}
+	}
+
+	interactionEvent := &profile.InteractionEvent{
+		TxHash:           txData.TxHash,
+		FromAddress:      txData.FromAddress,
+		ToAddress:        txData.ToAddress,
+		Value:            txData.Value,
+		GasUsed:          txData.GasUsed,
+		FunctionSelector: txData.FunctionSelector,
+		CallDepth:        evalCtx.CallDepth,
+		HasDelegatecall:  hasDelegatecall,
+		Status:           txData.Status,
+		Timestamp:        time.Now(),
+	}
+	if err := s.tracker.RecordInteraction(ctx, interactionEvent); err != nil {
+		s.logger.Warn("Failed to record interaction", zap.Error(err))
+	}
+
+	// 4b. 获取发送方行为画像
+	senderProfile, err := s.tracker.GetProfile(ctx, txData.FromAddress, txData.ToAddress)
+	if err != nil {
+		s.logger.Warn("Failed to get sender profile", zap.Error(err))
+	}
+	if senderProfile != nil {
+		evalCtx.SenderProfile = &ruleengine.AddressProfileData{
+			RecentTxCount:         senderProfile.RecentTxCount,
+			RecentTargetContracts: senderProfile.RecentTargetContracts,
+			RecentTotalValue:      senderProfile.RecentTotalValue,
+			RecentFailedTxCount:   senderProfile.RecentFailedTxCount,
+			RecentCallsToContract: senderProfile.RecentCallsToContract,
+			TotalTxCount:          senderProfile.TotalTxCount,
+			IsPrivileged:          senderProfile.IsPrivileged,
+		}
+	}
+
+	// 4c. 权限检查
+	callFrames := make([]profile.CallFrameInfo, len(txData.CallStack))
+	for i, frame := range txData.CallStack {
+		callFrames[i] = profile.CallFrameInfo{
+			Type:  frame.Type,
+			From:  frame.From,
+			To:    frame.To,
+			Depth: frame.Depth,
+			Input: frame.Input,
+		}
+	}
+
+	privResult := s.privRegistry.CheckPrivilege(
+		txData.FromAddress,
+		txData.ToAddress,
+		txData.FunctionSelector,
+		callFrames,
+	)
+	if privResult != nil {
+		evalCtx.PrivilegeCheck = &ruleengine.PrivilegeCheckData{
+			IsPrivilegedCall:  privResult.IsPrivilegedCall,
+			CallerAuthorized:  privResult.CallerAuthorized,
+			PrivilegeLevel:    privResult.PrivilegeLevel,
+			RequiredRole:      privResult.RequiredRole,
+			HasDelegatecall:   privResult.HasDelegatecall,
+			CallerIsContract:  privResult.CallerIsContract,
+			IntermediaryCount: len(privResult.IntermediaryContracts),
+		}
+		if privResult.MatchedEntry != nil {
+			evalCtx.PrivilegeCheck.FunctionName = privResult.MatchedEntry.FunctionName
+			evalCtx.ExtractedData["privilege_function"] = privResult.MatchedEntry.FunctionName
+		}
+		// 注入到 ExtractedData 供模板使用
+		evalCtx.ExtractedData["privilege_level"] = privResult.PrivilegeLevel
+		evalCtx.ExtractedData["required_role"] = privResult.RequiredRole
+		evalCtx.ExtractedData["effective_caller"] = privResult.EffectiveCaller
+		if len(privResult.IntermediaryContracts) > 0 {
+			evalCtx.ExtractedData["intermediary_contracts"] = strings.Join(privResult.IntermediaryContracts, ", ")
+		}
+	}
+
+	// 注入画像数据到 ExtractedData 供模板使用
+	if senderProfile != nil {
+		evalCtx.ExtractedData["sender_recent_tx_count"] = senderProfile.RecentTxCount
+		evalCtx.ExtractedData["sender_recent_contracts"] = senderProfile.RecentTargetContracts
+		evalCtx.ExtractedData["sender_recent_calls_to_target"] = senderProfile.RecentCallsToContract
+	}
+
+	// ====== 5. 触发 hook ======
 	rules := s.ruleManager.GetRules()
-	events, err := s.hookManager.Trigger("contract_function_call", ctx, rules)
+	events, err := s.hookManager.Trigger("contract_function_call", evalCtx, rules)
 	if err != nil {
 		return err
 	}
 
-	// 5. 处理风险事件
+	// 6. 处理风险事件
 	for _, event := range events {
 		var matchedRule *ruleengine.Rule
 		for _, rule := range rules {
@@ -183,7 +328,7 @@ func (s *RDSService) processTransaction(msg *kafkago.Message) error {
 			continue
 		}
 
-		score, err := s.scorer.CalculateScore(matchedRule, ctx)
+		score, err := s.scorer.CalculateScore(matchedRule, evalCtx)
 		if err != nil {
 			s.logger.Error("Failed to calculate score", zap.Error(err))
 			continue
@@ -191,7 +336,7 @@ func (s *RDSService) processTransaction(msg *kafkago.Message) error {
 
 		event.Score = score
 
-		if err := s.executor.Execute(matchedRule, ctx, score); err != nil {
+		if err := s.executor.Execute(matchedRule, evalCtx, score); err != nil {
 			s.logger.Error("Failed to execute actions", zap.Error(err))
 		}
 
@@ -199,7 +344,9 @@ func (s *RDSService) processTransaction(msg *kafkago.Message) error {
 			zap.String("rule", event.RuleName),
 			zap.String("tx_hash", event.TxHash),
 			zap.Int("score", score),
-			zap.Int("call_depth", ctx.CallDepth))
+			zap.Int("call_depth", evalCtx.CallDepth),
+			zap.Bool("privileged_call", privResult != nil && privResult.IsPrivilegedCall),
+			zap.Bool("unauthorized", privResult != nil && privResult.IsPrivilegedCall && !privResult.CallerAuthorized))
 	}
 
 	return nil

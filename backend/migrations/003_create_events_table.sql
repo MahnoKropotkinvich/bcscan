@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS events (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_events_tx_hash ON events(tx_hash);
-CREATE INDEX idx_events_contract ON events(contract_address);
-CREATE INDEX idx_events_name ON events(event_name);
-CREATE INDEX idx_events_timestamp ON events(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_events_tx_hash ON events(tx_hash);
+CREATE INDEX IF NOT EXISTS idx_events_contract ON events(contract_address);
+CREATE INDEX IF NOT EXISTS idx_events_name ON events(event_name);
+CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp DESC);

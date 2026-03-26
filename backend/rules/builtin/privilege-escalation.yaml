@@ -1,0 +1,76 @@
+metadata:
+  name: privilege-escalation-detection
+  version: "1.0"
+  author: security-team
+  description: "检测权限提升攻击：非特权账户调用特权函数（如 transferOwnership、upgradeTo、mint 等），尤其通过 delegatecall 链或代理合约间接调用"
+  tags:
+    - privilege
+    - escalation
+    - critical
+    - access-control
+  enabled: true
+
+config:
+  severity: critical
+  priority: 95
+  throttle:
+    enabled: true
+    max_alerts: 5
+    time_window: "5m"
+  hooks:
+    - contract_function_call
+
+# 核心逻辑：
+# 1. 该调用命中了特权函数（is_privileged_call == true）
+# 2. 且调用者没有授权（caller_authorized == false）
+triggers:
+  operator: AND
+  conditions:
+    - type: is_privileged_call
+      operator: "=="
+      value: true
+      description: "调用了特权函数（如 transferOwnership、mint、upgradeTo 等）"
+    - type: caller_authorized
+      operator: "=="
+      value: false
+      description: "调用者不在授权列表中（疑似未授权访问）"
+
+scoring:
+  base_score: 85
+  factors:
+    # 通过 delegatecall 链调用 → 可能利用代理漏洞
+    - condition: "has_delegatecall == true"
+      score: 10
+      description: "通过 delegatecall 链调用特权函数（疑似代理漏洞利用）"
+    # 调用者是合约而非 EOA → 可能是攻击合约
+    - condition: "caller_is_contract == true"
+      score: 5
+      description: "调用者是合约地址（可能是攻击合约）"
+    # 有中间代理合约
+    - condition: "intermediary_count > 1"
+      score: 5
+      description: "存在多层中间代理合约"
+    # 该账户最近交易频繁
+    - condition: "sender_recent_tx_count > 10"
+      score: 5
+      description: "发送方最近 10 分钟内交易频繁"
+
+actions:
+  - type: alert
+    severity: critical
+    title: "⚠️ 检测到权限提升攻击"
+    message: |
+      在交易 {{tx_hash}} 中检测到未授权的特权函数调用：
+      - 调用者: {{from_address}}（非授权地址）
+      - 目标合约: {{to_address}}
+      - 特权函数: {{privilege_function}}
+      - 所需角色: {{required_role}}
+      - 权限级别: {{privilege_level}}
+      - 通过 delegatecall: {{has_delegatecall}}
+      建议立即审查该交易和相关合约状态。
+    channels:
+      - websocket
+      - log
+
+  - type: log_risk_event
+    severity: critical

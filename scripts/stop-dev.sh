@@ -6,6 +6,6 @@ echo "🛑 停止 bcscan 开发环境..."
 
 cd "$(dirname "$0")/../deployments"
 
-podman-compose -f podman-compose.yml down
+podman-compose -f docker-compose.yml down
 
 echo "✅ 开发环境已停止"

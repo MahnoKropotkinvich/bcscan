@@ -2,9 +2,9 @@ package hooks
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/haswell/bcscan/internal/ruleengine"
+	"github.com/haswell/bcscan/internal/types"
 )
 
 // ContractFunctionHook 合约函数调用钩子
@@ -22,9 +22,9 @@ func (h *ContractFunctionHook) Name() string {
 	return "contract_function_call"
 }
 
-func (h *ContractFunctionHook) Match(txData *TransactionData) bool {
-	// 匹配所有合约调用（有 function selector）
-	return txData.FunctionSelector != ""
+func (h *ContractFunctionHook) Match(txData *types.TransactionData) bool {
+	// 匹配所有交易（包括纯 ETH 转账），让规则条件来过滤
+	return true
 }
 
 func (h *ContractFunctionHook) Execute(ctx *ruleengine.EvaluationContext, rules []*ruleengine.Rule) ([]*RiskEvent, error) {
@@ -84,14 +84,15 @@ func (h *ContractFunctionHook) evaluateRule(rule *ruleengine.Rule, ctx *ruleengi
 		results = append(results, result)
 	}
 
-	if operator == "AND" {
+	switch operator {
+	case "AND":
 		for _, r := range results {
 			if !r {
 				return false, nil
 			}
 		}
 		return true, nil
-	} else if operator == "OR" {
+	case "OR":
 		for _, r := range results {
 			if r {
 				return true, nil
@@ -104,7 +105,6 @@ func (h *ContractFunctionHook) evaluateRule(rule *ruleengine.Rule, ctx *ruleengi
 }
 
 func (h *ContractFunctionHook) evaluateCondition(condition ruleengine.RuleCondition, ctx *ruleengine.EvaluationContext) (bool, error) {
-	// 构建表达式
 	expression := fmt.Sprintf("%s %s %v", condition.Type, condition.Operator, condition.Value)
 	return h.evaluator.Evaluate(expression, ctx)
 }
@@ -128,48 +128,4 @@ func (h *ContractFunctionHook) createRiskEvent(rule *ruleengine.Rule, ctx *rulee
 	}
 
 	return event
-}
-
-// 检测重入模式
-func DetectReentrancyPattern(callStack []CallFrame) bool {
-	addressCalls := make(map[string][]int)
-
-	for i, frame := range callStack {
-		addressCalls[frame.To] = append(addressCalls[frame.To], i)
-	}
-
-	// 检查是否有地址被多次调用
-	for _, indices := range addressCalls {
-		if len(indices) >= 2 {
-			// 检查是否是重入模式（A->B->A）
-			for i := 0; i < len(indices)-1; i++ {
-				if indices[i+1] > indices[i]+1 {
-					return true
-				}
-			}
-		}
-	}
-
-	return false
-}
-
-// 计算最大调用深度
-func CalculateMaxCallDepth(callStack []CallFrame) int {
-	maxDepth := 0
-	for _, frame := range callStack {
-		if frame.Depth > maxDepth {
-			maxDepth = frame.Depth
-		}
-	}
-	return maxDepth
-}
-
-// 检查是否包含特定函数调用
-func ContainsFunctionCall(callStack []CallFrame, functionSelector string) bool {
-	for _, frame := range callStack {
-		if strings.HasPrefix(frame.Input, functionSelector) {
-			return true
-		}
-	}
-	return false
 }

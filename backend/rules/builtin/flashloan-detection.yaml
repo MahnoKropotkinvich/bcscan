@@ -1,0 +1,39 @@
+metadata:
+  name: flashloan-detection
+  version: "1.2"
+  author: system
+  description: "检测疑似闪电贷攻击模式"
+  tags:
+    - flashloan
+    - defi
+    - attack
+  enabled: true
+
+config:
+  severity: critical
+  priority: 90
+  throttle:
+    enabled: false
+  hooks:
+    - contract_function_call
+
+triggers:
+  operator: AND
+  conditions:
+    - type: value
+      operator: ">"
+      value: 1.0e19
+      description: "交易金额超过 10 ETH（大额资金流动）"
+
+scoring:
+  base_score: 80
+  factors:
+    - condition: "value > 2.0e19"
+      score: 10
+      description: "超过 20 ETH"
+    - condition: "value > 4.0e19"
+      score: 10
+      description: "超过 40 ETH"
+
+actions:
+  - type: log_risk_event

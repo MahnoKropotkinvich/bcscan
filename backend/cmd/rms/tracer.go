@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	btypes "github.com/haswell/bcscan/internal/types"
 )
 
 // TraceResult debug_traceTransaction 返回结果
@@ -24,7 +25,7 @@ type TraceResult struct {
 	Calls   []TraceResult `json:"calls"`
 }
 
-func buildTransactionData(ctx context.Context, client *ethclient.Client, tx *types.Transaction, receipt *types.Receipt, block *types.Block) (*TransactionData, error) {
+func buildTransactionData(ctx context.Context, client *ethclient.Client, tx *types.Transaction, receipt *types.Receipt, block *types.Block) (*btypes.TransactionData, error) {
 	from, _ := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
 	to := ""
 	if tx.To() != nil {
@@ -39,7 +40,7 @@ func buildTransactionData(ctx context.Context, client *ethclient.Client, tx *typ
 		inputData = "0x" + hex.EncodeToString(tx.Data())
 	}
 
-	txData := &TransactionData{
+	txData := &btypes.TransactionData{
 		TxHash:           tx.Hash().Hex(),
 		BlockNumber:      block.NumberU64(),
 		FromAddress:      from.Hex(),
@@ -52,8 +53,8 @@ func buildTransactionData(ctx context.Context, client *ethclient.Client, tx *typ
 		Timestamp:        block.Time(),
 		FunctionSelector: functionSelector,
 		InputData:        inputData,
-		CallStack:        []CallFrame{},
-		Events:           []EventLog{},
+		CallStack:        []btypes.CallFrame{},
+		Events:           []btypes.EventLog{},
 	}
 
 	// 追踪调用栈（仅对合约调用）
@@ -70,7 +71,7 @@ func buildTransactionData(ctx context.Context, client *ethclient.Client, tx *typ
 		for i, topic := range log.Topics {
 			topics[i] = topic.Hex()
 		}
-		txData.Events = append(txData.Events, EventLog{
+		txData.Events = append(txData.Events, btypes.EventLog{
 			Address: log.Address.Hex(),
 			Topics:  topics,
 			Data:    "0x" + hex.EncodeToString(log.Data),
@@ -83,7 +84,6 @@ func buildTransactionData(ctx context.Context, client *ethclient.Client, tx *typ
 func traceTransaction(ctx context.Context, client *ethclient.Client, txHash common.Hash) (*TraceResult, error) {
 	var result TraceResult
 
-	// 调用 debug_traceTransaction
 	err := client.Client().CallContext(ctx, &result, "debug_traceTransaction", txHash, map[string]interface{}{
 		"tracer": "callTracer",
 	})
@@ -95,15 +95,14 @@ func traceTransaction(ctx context.Context, client *ethclient.Client, txHash comm
 	return &result, nil
 }
 
-func parseCallStack(trace *TraceResult, depth int) []CallFrame {
+func parseCallStack(trace *TraceResult, depth int) []btypes.CallFrame {
 	if trace == nil {
-		return []CallFrame{}
+		return []btypes.CallFrame{}
 	}
 
-	frames := []CallFrame{}
+	frames := []btypes.CallFrame{}
 
-	// 当前调用帧
-	frame := CallFrame{
+	frame := btypes.CallFrame{
 		Type:     trace.Type,
 		From:     trace.From,
 		To:       trace.To,

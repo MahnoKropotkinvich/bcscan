@@ -14,8 +14,10 @@ type RedisClient struct {
 
 func NewRedisClient(addr string) *RedisClient {
 	rdb := redis.NewClient(&redis.Options{
-		Addr: addr,
-		DB:   0,
+		Addr:         addr,
+		DB:           0,
+		PoolSize:     10,
+		MinIdleConns: 3,
 	})
 
 	return &RedisClient{client: rdb}
@@ -45,12 +47,21 @@ func (r *RedisClient) GetRaw(ctx context.Context, key string) (string, error) {
 	return r.client.Get(ctx, key).Result()
 }
 
+// Publish 发布消息到 Redis 频道
+// message 可以是 string（直接发送）或其他类型（JSON 序列化后发送）
 func (r *RedisClient) Publish(ctx context.Context, channel string, message interface{}) error {
-	data, err := json.Marshal(message)
-	if err != nil {
-		return err
+	var payload string
+	switch v := message.(type) {
+	case string:
+		payload = v
+	default:
+		data, err := json.Marshal(message)
+		if err != nil {
+			return err
+		}
+		payload = string(data)
 	}
-	return r.client.Publish(ctx, channel, data).Err()
+	return r.client.Publish(ctx, channel, payload).Err()
 }
 
 func (r *RedisClient) Subscribe(ctx context.Context, channel string) *redis.PubSub {

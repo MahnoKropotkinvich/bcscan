@@ -17,11 +17,6 @@ func NewEvaluator() *Evaluator {
 }
 
 // Evaluate 求值表达式，返回布尔结果
-// 支持的表达式示例:
-//   - "call_depth > 3"
-//   - "gas_used > 1000000"
-//   - "call_depth > 3 AND gas_used > 1000000"
-//   - "status == 1 OR value > 1000"
 func (e *Evaluator) Evaluate(expression string, ctx *EvaluationContext) (bool, error) {
 	if expression == "" {
 		return true, nil
@@ -39,7 +34,6 @@ func (e *Evaluator) Evaluate(expression string, ctx *EvaluationContext) (bool, e
 	return e.evaluateSingle(expression, ctx)
 }
 
-// evaluateAND 求值 AND 表达式
 func (e *Evaluator) evaluateAND(expression string, ctx *EvaluationContext) (bool, error) {
 	parts := strings.Split(expression, " AND ")
 	for _, part := range parts {
@@ -48,13 +42,12 @@ func (e *Evaluator) evaluateAND(expression string, ctx *EvaluationContext) (bool
 			return false, err
 		}
 		if !result {
-			return false, nil // 短路求值
+			return false, nil
 		}
 	}
 	return true, nil
 }
 
-// evaluateOR 求值 OR 表达式
 func (e *Evaluator) evaluateOR(expression string, ctx *EvaluationContext) (bool, error) {
 	parts := strings.Split(expression, " OR ")
 	for _, part := range parts {
@@ -63,18 +56,15 @@ func (e *Evaluator) evaluateOR(expression string, ctx *EvaluationContext) (bool,
 			return false, err
 		}
 		if result {
-			return true, nil // 短路求值
+			return true, nil
 		}
 	}
 	return false, nil
 }
 
-// evaluateSingle 求值单个比较表达式
-// 支持的运算符: >, <, >=, <=, ==, !=
 func (e *Evaluator) evaluateSingle(expression string, ctx *EvaluationContext) (bool, error) {
 	expression = strings.TrimSpace(expression)
 
-	// 尝试匹配各种运算符
 	operators := []string{">=", "<=", "==", "!=", ">", "<"}
 
 	for _, op := range operators {
@@ -87,19 +77,16 @@ func (e *Evaluator) evaluateSingle(expression string, ctx *EvaluationContext) (b
 			left := strings.TrimSpace(parts[0])
 			right := strings.TrimSpace(parts[1])
 
-			// 获取左侧变量的值
 			leftValue, err := e.getValue(left, ctx)
 			if err != nil {
 				return false, fmt.Errorf("failed to get value for '%s': %w", left, err)
 			}
 
-			// 获取右侧值（可能是变量或常量）
 			rightValue, err := e.parseValue(right, ctx)
 			if err != nil {
 				return false, fmt.Errorf("failed to parse value '%s': %w", right, err)
 			}
 
-			// 执行比较
 			return e.compare(leftValue, op, rightValue)
 		}
 	}
@@ -109,12 +96,10 @@ func (e *Evaluator) evaluateSingle(expression string, ctx *EvaluationContext) (b
 
 // getValue 从上下文中获取变量的值
 func (e *Evaluator) getValue(varName string, ctx *EvaluationContext) (interface{}, error) {
-	// 先检查提取的数据
 	if val, ok := ctx.GetExtractedValue(varName); ok {
 		return val, nil
 	}
 
-	// 从上下文中获取预定义的字段
 	switch varName {
 	case "call_depth":
 		return ctx.CallDepth, nil
@@ -135,8 +120,8 @@ func (e *Evaluator) getValue(varName string, ctx *EvaluationContext) (interface{
 		}
 	case "value":
 		if ctx.Transaction != nil {
-			// 将字符串转换为数字
-			val, err := strconv.ParseInt(ctx.Transaction.Value, 10, 64)
+			// 用 float64 解析 wei 值（int64 装不下 > 9.2 ETH 的 wei 值）
+			val, err := strconv.ParseFloat(ctx.Transaction.Value, 64)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse value: %w", err)
 			}
@@ -150,6 +135,75 @@ func (e *Evaluator) getValue(varName string, ctx *EvaluationContext) (interface{
 		if ctx.Block != nil {
 			return ctx.Block.BlockNumber, nil
 		}
+
+	// ====== 地址画像变量 ======
+	case "sender_recent_tx_count":
+		if ctx.SenderProfile != nil {
+			return ctx.SenderProfile.RecentTxCount, nil
+		}
+		return 0, nil
+	case "sender_recent_contracts":
+		if ctx.SenderProfile != nil {
+			return ctx.SenderProfile.RecentTargetContracts, nil
+		}
+		return 0, nil
+	case "sender_recent_value":
+		if ctx.SenderProfile != nil {
+			return ctx.SenderProfile.RecentTotalValue, nil
+		}
+		return 0.0, nil
+	case "sender_recent_failed_tx":
+		if ctx.SenderProfile != nil {
+			return ctx.SenderProfile.RecentFailedTxCount, nil
+		}
+		return 0, nil
+	case "sender_recent_calls_to_target":
+		if ctx.SenderProfile != nil {
+			return ctx.SenderProfile.RecentCallsToContract, nil
+		}
+		return 0, nil
+	case "sender_total_tx":
+		if ctx.SenderProfile != nil {
+			return ctx.SenderProfile.TotalTxCount, nil
+		}
+		return int64(0), nil
+	case "sender_is_privileged":
+		if ctx.SenderProfile != nil {
+			return ctx.SenderProfile.IsPrivileged, nil
+		}
+		return false, nil
+
+	// ====== 权限检查变量 ======
+	case "is_privileged_call":
+		if ctx.PrivilegeCheck != nil {
+			return ctx.PrivilegeCheck.IsPrivilegedCall, nil
+		}
+		return false, nil
+	case "caller_authorized":
+		if ctx.PrivilegeCheck != nil {
+			return ctx.PrivilegeCheck.CallerAuthorized, nil
+		}
+		return true, nil // 默认有权限（没有匹配权限条目时不算越权）
+	case "privilege_level":
+		if ctx.PrivilegeCheck != nil {
+			return ctx.PrivilegeCheck.PrivilegeLevel, nil
+		}
+		return "", nil
+	case "has_delegatecall":
+		if ctx.PrivilegeCheck != nil {
+			return ctx.PrivilegeCheck.HasDelegatecall, nil
+		}
+		return false, nil
+	case "caller_is_contract":
+		if ctx.PrivilegeCheck != nil {
+			return ctx.PrivilegeCheck.CallerIsContract, nil
+		}
+		return false, nil
+	case "intermediary_count":
+		if ctx.PrivilegeCheck != nil {
+			return ctx.PrivilegeCheck.IntermediaryCount, nil
+		}
+		return 0, nil
 	}
 
 	return nil, fmt.Errorf("unknown variable: %s", varName)
@@ -157,12 +211,12 @@ func (e *Evaluator) getValue(varName string, ctx *EvaluationContext) (interface{
 
 // parseValue 解析值（可能是常量或变量）
 func (e *Evaluator) parseValue(value string, ctx *EvaluationContext) (interface{}, error) {
-	// 尝试解析为整数
+	// 尝试解析为整数（不溢出时用 int64）
 	if intVal, err := strconv.ParseInt(value, 10, 64); err == nil {
 		return intVal, nil
 	}
 
-	// 尝试解析为浮点数
+	// int64 溢出或科学计数法 → 用 float64
 	if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
 		return floatVal, nil
 	}
@@ -172,31 +226,23 @@ func (e *Evaluator) parseValue(value string, ctx *EvaluationContext) (interface{
 		return boolVal, nil
 	}
 
-	// 去除引号（如果是字符串字面量）
+	// 去除引号（字符串字面量）
 	if (strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`)) ||
 		(strings.HasPrefix(value, `'`) && strings.HasSuffix(value, `'`)) {
 		return value[1 : len(value)-1], nil
 	}
 
-	// 否则当作变量名处理
+	// 当作变量名
 	return e.getValue(value, ctx)
 }
 
 // compare 比较两个值
 func (e *Evaluator) compare(left interface{}, operator string, right interface{}) (bool, error) {
-	// 尝试转换为 int64 进行比较
-	leftInt, leftIsInt := toInt64(left)
-	rightInt, rightIsInt := toInt64(right)
+	// 都能转 float64 就用 float64 比较（覆盖 int 和大数）
+	leftFloat, leftOk := toFloat64(left)
+	rightFloat, rightOk := toFloat64(right)
 
-	if leftIsInt && rightIsInt {
-		return compareInt64(leftInt, operator, rightInt)
-	}
-
-	// 尝试转换为 float64 进行比较
-	leftFloat, leftIsFloat := toFloat64(left)
-	rightFloat, rightIsFloat := toFloat64(right)
-
-	if leftIsFloat && rightIsFloat {
+	if leftOk && rightOk {
 		return compareFloat64(leftFloat, operator, rightFloat)
 	}
 
@@ -214,34 +260,6 @@ func (e *Evaluator) compare(left interface{}, operator string, right interface{}
 	}
 }
 
-// toInt64 尝试将值转换为 int64
-func toInt64(val interface{}) (int64, bool) {
-	switch v := val.(type) {
-	case int:
-		return int64(v), true
-	case int8:
-		return int64(v), true
-	case int16:
-		return int64(v), true
-	case int32:
-		return int64(v), true
-	case int64:
-		return v, true
-	case uint:
-		return int64(v), true
-	case uint8:
-		return int64(v), true
-	case uint16:
-		return int64(v), true
-	case uint32:
-		return int64(v), true
-	case uint64:
-		return int64(v), true
-	default:
-		return 0, false
-	}
-}
-
 // toFloat64 尝试将值转换为 float64
 func toFloat64(val interface{}) (float64, bool) {
 	switch v := val.(type) {
@@ -251,32 +269,26 @@ func toFloat64(val interface{}) (float64, bool) {
 		return v, true
 	case int:
 		return float64(v), true
+	case int8:
+		return float64(v), true
+	case int16:
+		return float64(v), true
+	case int32:
+		return float64(v), true
 	case int64:
+		return float64(v), true
+	case uint:
+		return float64(v), true
+	case uint8:
+		return float64(v), true
+	case uint16:
+		return float64(v), true
+	case uint32:
 		return float64(v), true
 	case uint64:
 		return float64(v), true
 	default:
 		return 0, false
-	}
-}
-
-// compareInt64 比较两个 int64 值
-func compareInt64(left int64, operator string, right int64) (bool, error) {
-	switch operator {
-	case ">":
-		return left > right, nil
-	case "<":
-		return left < right, nil
-	case ">=":
-		return left >= right, nil
-	case "<=":
-		return left <= right, nil
-	case "==":
-		return left == right, nil
-	case "!=":
-		return left != right, nil
-	default:
-		return false, fmt.Errorf("unsupported operator: %s", operator)
 	}
 }
 

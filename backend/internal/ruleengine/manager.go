@@ -57,6 +57,12 @@ func (rm *RuleManager) LoadRules(ctx context.Context) error {
 	return nil
 }
 
+// InvalidateCache 清除规则缓存（强制下次从文件加载）
+func (rm *RuleManager) InvalidateCache(ctx context.Context) {
+	rm.redis.Delete(ctx, RulesCacheKey)
+	rm.logger.Info("Rules cache invalidated")
+}
+
 // GetRules 获取当前规则
 func (rm *RuleManager) GetRules() []*Rule {
 	return rm.rules
@@ -76,6 +82,8 @@ func (rm *RuleManager) SubscribeUpdates(ctx context.Context) {
 			return
 		case msg := <-ch:
 			rm.logger.Info("Received rule update notification", zap.String("message", msg.Payload))
+			// 先清除缓存，再重新加载
+			rm.InvalidateCache(ctx)
 			if err := rm.LoadRules(ctx); err != nil {
 				rm.logger.Error("Failed to reload rules", zap.Error(err))
 			} else {

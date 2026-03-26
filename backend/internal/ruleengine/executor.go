@@ -18,8 +18,7 @@ type Executor struct {
 }
 
 // NewExecutor 创建新的执行器
-func NewExecutor(repo *repository.RiskEventRepository) *Executor {
-	logger, _ := zap.NewProduction()
+func NewExecutor(repo *repository.RiskEventRepository, logger *zap.Logger) *Executor {
 	return &Executor{
 		repo:   repo,
 		logger: logger,
@@ -59,6 +58,7 @@ func (e *Executor) executeAlert(action RuleAction, rule *Rule, ctx *EvaluationCo
 	e.logger.Info("ALERT",
 		zap.String("title", title),
 		zap.String("message", message),
+		zap.String("severity", action.Severity),
 		zap.Int("score", score))
 
 	return nil
@@ -83,8 +83,8 @@ func (e *Executor) logRiskEvent(action RuleAction, rule *Rule, ctx *EvaluationCo
 		Severity:        rule.Config.Severity,
 		ContractAddress: contractAddr,
 		TxHash:          txHash,
-		Description:     rule.Metadata.Description,
-		Score:           score,
+		Description:     e.replaceVariables(rule.Metadata.Description, ctx),
+		Score:           float64(score),
 		DetectedAt:      time.Now(),
 	}
 
@@ -111,6 +111,21 @@ func (e *Executor) replaceVariables(template string, ctx *EvaluationContext) str
 	// 替换运行时数据
 	result = strings.ReplaceAll(result, "{{call_depth}}", fmt.Sprintf("%d", ctx.CallDepth))
 	result = strings.ReplaceAll(result, "{{call_count}}", fmt.Sprintf("%d", ctx.CallCount))
+
+	// 替换权限检查数据
+	if ctx.PrivilegeCheck != nil {
+		result = strings.ReplaceAll(result, "{{has_delegatecall}}", fmt.Sprintf("%v", ctx.PrivilegeCheck.HasDelegatecall))
+		result = strings.ReplaceAll(result, "{{caller_authorized}}", fmt.Sprintf("%v", ctx.PrivilegeCheck.CallerAuthorized))
+		result = strings.ReplaceAll(result, "{{caller_is_contract}}", fmt.Sprintf("%v", ctx.PrivilegeCheck.CallerIsContract))
+		result = strings.ReplaceAll(result, "{{intermediary_count}}", fmt.Sprintf("%d", ctx.PrivilegeCheck.IntermediaryCount))
+	}
+
+	// 替换画像数据
+	if ctx.SenderProfile != nil {
+		result = strings.ReplaceAll(result, "{{sender_recent_tx_count}}", fmt.Sprintf("%d", ctx.SenderProfile.RecentTxCount))
+		result = strings.ReplaceAll(result, "{{sender_recent_contracts}}", fmt.Sprintf("%d", ctx.SenderProfile.RecentTargetContracts))
+		result = strings.ReplaceAll(result, "{{sender_recent_calls_to_target}}", fmt.Sprintf("%d", ctx.SenderProfile.RecentCallsToContract))
+	}
 
 	return result
 }

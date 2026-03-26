@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"math/big"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,7 +9,9 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/haswell/bcscan/internal/kafka"
+	btypes "github.com/haswell/bcscan/internal/types"
 	"go.uber.org/zap"
+	"math/big"
 )
 
 func main() {
@@ -113,19 +114,21 @@ func processTransaction(ctx context.Context, client *ethclient.Client, producer 
 		return
 	}
 
-	// 构建完整的交易数据（包含调用栈）
 	txData, err := buildTransactionData(ctx, client, tx, receipt, block)
 	if err != nil {
 		logger.Error("Failed to build transaction data", zap.Error(err))
 		return
 	}
 
-	// 发送到 Kafka
 	if err := producer.SendMessage(ctx, txData.TxHash, txData); err != nil {
 		logger.Error("Failed to send transaction", zap.Error(err))
 		return
 	}
 
+	logEvent(logger, txData)
+}
+
+func logEvent(logger *zap.Logger, txData *btypes.TransactionData) {
 	logger.Info("Transaction processed",
 		zap.String("tx_hash", txData.TxHash),
 		zap.Int("call_stack_depth", len(txData.CallStack)),

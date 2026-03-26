@@ -129,6 +129,18 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # 前端
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: bcscan-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
 networks:
   default:
     name: bcscan

@@ -16,11 +16,11 @@ type Producer struct {
 
 // NewProducer 创建新的生产者
 func NewProducer(brokers []string, topic string, logger *zap.Logger) *Producer {
-	writer := kafka.NewWriter(kafka.WriterConfig{
-		Brokers:  brokers,
+	writer := &kafka.Writer{
+		Addr:     kafka.TCP(brokers...),
 		Topic:    topic,
 		Balancer: &kafka.LeastBytes{},
-	})
+	}
 
 	return &Producer{
 		writer: writer,
@@ -30,14 +30,12 @@ func NewProducer(brokers []string, topic string, logger *zap.Logger) *Producer {
 
 // SendMessage 发送消息
 func (p *Producer) SendMessage(ctx context.Context, key string, value interface{}) error {
-	// 序列化消息
 	data, err := json.Marshal(value)
 	if err != nil {
 		p.logger.Error("Failed to marshal message", zap.Error(err))
 		return err
 	}
 
-	// 发送消息
 	msg := kafka.Message{
 		Key:   []byte(key),
 		Value: data,

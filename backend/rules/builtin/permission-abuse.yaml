@@ -1,0 +1,67 @@
+metadata:
+  name: permission-abuse-detection
+  version: "2.0"
+  author: security-team
+  description: "检测权限滥用行为：特权函数被调用且伴随异常模式（高调用深度、大量 Gas、delegatecall 链），即使调用者是授权的，也可能是被钓鱼或密钥泄露"
+  tags:
+    - permission
+    - access-control
+    - abuse
+  enabled: true
+
+config:
+  severity: high
+  priority: 80
+  throttle:
+    enabled: true
+    max_alerts: 10
+    time_window: "5m"
+  hooks:
+    - contract_function_call
+
+# 核心逻辑：
+# 1. 调用了特权函数
+# 2. 且调用模式异常（深调用链 OR 高 gas OR delegatecall）
+triggers:
+  operator: AND
+  conditions:
+    - type: is_privileged_call
+      operator: "=="
+      value: true
+      description: "调用了特权函数"
+    - type: call_depth
+      operator: ">="
+      value: 2
+      description: "调用深度 >= 2（通过中间合约调用，非直接调用）"
+
+scoring:
+  base_score: 70
+  factors:
+    - condition: "has_delegatecall == true"
+      score: 15
+      description: "涉及 delegatecall（可能通过代理漏洞）"
+    - condition: "call_depth > 5"
+      score: 10
+      description: "深层调用链可能表示复杂的权限升级攻击"
+    - condition: "gas_used > 500000"
+      score: 10
+      description: "高 Gas 消耗表示复杂操作"
+    - condition: "caller_authorized == false"
+      score: 15
+      description: "调用者未授权（同时触发 privilege-escalation 规则）"
+
+actions:
+  - type: alert
+    severity: high
+    title: "疑似权限滥用 - {{tx_hash}}"
+    message: |
+      在交易 {{tx_hash}} 中检测到特权函数通过异常模式被调用：
+      - 调用者: {{from_address}}
+      - 目标: {{to_address}}
+      - 特权函数: {{privilege_function}}
+      - 调用深度: {{call_depth}}
+      - 通过 delegatecall: {{has_delegatecall}}
+    channels:
+      - websocket
+      - log
+  - type: log_risk_event

@@ -16,6 +16,7 @@ FROM alpine:latest
 WORKDIR /app
 
 COPY --from=builder /build/build/api .
+COPY --from=builder /build/rules ./rules
 
 RUN adduser -D -u 1000 api && chown -R api:api /app
 USER api

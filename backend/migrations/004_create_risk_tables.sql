@@ -13,11 +13,11 @@ CREATE TABLE IF NOT EXISTS risk_events (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_risk_events_type ON risk_events(event_type);
-CREATE INDEX idx_risk_events_severity ON risk_events(severity);
-CREATE INDEX idx_risk_events_contract ON risk_events(contract_address);
-CREATE INDEX idx_risk_events_tx ON risk_events(tx_hash);
-CREATE INDEX idx_risk_events_detected_at ON risk_events(detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_risk_events_type ON risk_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_risk_events_severity ON risk_events(severity);
+CREATE INDEX IF NOT EXISTS idx_risk_events_contract ON risk_events(contract_address);
+CREATE INDEX IF NOT EXISTS idx_risk_events_tx ON risk_events(tx_hash);
+CREATE INDEX IF NOT EXISTS idx_risk_events_detected_at ON risk_events(detected_at DESC);
 
 -- 检测规则表
 CREATE TABLE IF NOT EXISTS detection_rules (
@@ -32,5 +32,5 @@ CREATE TABLE IF NOT EXISTS detection_rules (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_rules_name ON detection_rules(name);
-CREATE INDEX idx_rules_enabled ON detection_rules(enabled);
+CREATE INDEX IF NOT EXISTS idx_rules_name ON detection_rules(name);
+CREATE INDEX IF NOT EXISTS idx_rules_enabled ON detection_rules(enabled);

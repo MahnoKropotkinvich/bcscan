@@ -13,10 +13,10 @@ CREATE TABLE IF NOT EXISTS alerts (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_alerts_risk_event ON alerts(risk_event_id);
-CREATE INDEX idx_alerts_status ON alerts(status);
-CREATE INDEX idx_alerts_severity ON alerts(severity);
-CREATE INDEX idx_alerts_assigned_to ON alerts(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_alerts_risk_event ON alerts(risk_event_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
+CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity);
+CREATE INDEX IF NOT EXISTS idx_alerts_assigned_to ON alerts(assigned_to);
 
 -- 通知渠道表
 CREATE TABLE IF NOT EXISTS notification_channels (
@@ -28,8 +28,8 @@ CREATE TABLE IF NOT EXISTS notification_channels (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_channels_user_id ON notification_channels(user_id);
-CREATE INDEX idx_channels_type ON notification_channels(channel_type);
+CREATE INDEX IF NOT EXISTS idx_channels_user_id ON notification_channels(user_id);
+CREATE INDEX IF NOT EXISTS idx_channels_type ON notification_channels(channel_type);
 
 -- 通知日志表
 CREATE TABLE IF NOT EXISTS notification_logs (
@@ -42,5 +42,5 @@ CREATE TABLE IF NOT EXISTS notification_logs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_notification_logs_alert ON notification_logs(alert_id);
-CREATE INDEX idx_notification_logs_status ON notification_logs(status);
+CREATE INDEX IF NOT EXISTS idx_notification_logs_alert ON notification_logs(alert_id);
+CREATE INDEX IF NOT EXISTS idx_notification_logs_status ON notification_logs(status);

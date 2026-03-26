@@ -1,0 +1,51 @@
+metadata:
+  name: abnormal-gas-consumption
+  version: "2.0"
+  author: security-team
+  description: "检测异常 Gas 消耗：合约调用消耗大量 Gas（> 100,000），可能表示 DoS 攻击、循环漏洞或恶意合约"
+  tags:
+    - gas
+    - dos
+    - anomaly
+  enabled: true
+
+config:
+  severity: medium
+  priority: 40
+  throttle:
+    enabled: true
+    max_alerts: 20
+    time_window: "5m"
+  hooks:
+    - contract_function_call
+
+triggers:
+  operator: AND
+  conditions:
+    - type: gas_used
+      operator: ">"
+      value: 100000
+      description: "Gas 消耗超过 100,000（排除普通 ETH 转账的 21000）"
+
+scoring:
+  base_score: 35
+  factors:
+    - condition: "gas_used > 200000"
+      score: 15
+      description: "Gas 消耗超过 200,000"
+    - condition: "gas_used > 500000"
+      score: 20
+      description: "Gas 消耗超过 500,000（严重异常）"
+    - condition: "call_depth > 3"
+      score: 10
+      description: "调用深度较深"
+    - condition: "value > 1.0e18"
+      score: 10
+      description: "伴随 > 1 ETH 转账"
+    - condition: "sender_recent_tx_count > 10"
+      score: 10
+      description: "发送方最近交易频繁"
+
+actions:
+  - type: log_risk_event
+    severity: medium

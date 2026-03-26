@@ -1,0 +1,78 @@
+metadata:
+  name: contract-abuse-pattern
+  version: "1.0"
+  author: security-team
+  description: "检测合约滥用模式：同一账户在短时间窗口内对同一合约发起异常频繁的调用，可能是自动化攻击、刷单、DoS 或漏洞利用"
+  tags:
+    - abuse
+    - pattern
+    - high
+    - behavioral
+  enabled: true
+
+config:
+  severity: high
+  priority: 75
+  throttle:
+    enabled: true
+    max_alerts: 10
+    time_window: "5m"
+  hooks:
+    - contract_function_call
+
+# 核心逻辑：
+# 最近 10 分钟窗口内，同一发送方对同一合约的调用次数超过阈值
+triggers:
+  operator: AND
+  conditions:
+    # 对同一合约的调用 >= 5 次
+    - type: sender_recent_calls_to_target
+      operator: ">="
+      value: 5
+      description: "最近 10 分钟内对同一合约调用 >= 5 次"
+    # 整体活跃度也高
+    - type: sender_recent_tx_count
+      operator: ">="
+      value: 8
+      description: "最近 10 分钟内总交易 >= 8 笔"
+
+scoring:
+  base_score: 60
+  factors:
+    # 对同一合约调用非常频繁
+    - condition: "sender_recent_calls_to_target > 10"
+      score: 15
+      description: "对同一合约调用超过 10 次（高度异常）"
+    # 同时交互多个不同合约 → 可能是自动化脚本
+    - condition: "sender_recent_contracts > 5"
+      score: 10
+      description: "最近同时交互了超过 5 个不同合约"
+    # 有失败交易 → 可能在试探漏洞
+    - condition: "sender_recent_failed_tx > 2"
+      score: 15
+      description: "最近有多笔失败交易（可能在试探攻击向量）"
+    # 总交易数很少（新账户）→ 更可疑
+    - condition: "sender_total_tx < 20"
+      score: 10
+      description: "低历史交易数的新账户突然高频调用"
+    # 伴随大额资金
+    - condition: "value > 1.0e18"
+      score: 10
+      description: "伴随 > 1 ETH 的资金转移"
+
+actions:
+  - type: alert
+    severity: high
+    title: "检测到合约滥用模式"
+    message: |
+      账户 {{from_address}} 在最近 10 分钟内对合约 {{to_address}} 发起了 {{sender_recent_calls_to_target}} 次调用：
+      - 最近总交易数: {{sender_recent_tx_count}}
+      - 交互合约数: {{sender_recent_contracts}}
+      - 交易 Hash: {{tx_hash}}
+      该行为模式与自动化攻击/漏洞利用一致，建议审查。
+    channels:
+      - websocket
+      - log
+
+  - type: log_risk_event
+    severity: high
