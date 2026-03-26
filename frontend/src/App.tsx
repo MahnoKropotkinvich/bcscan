@@ -4,33 +4,78 @@ import { Layout, Menu, Badge, Tooltip, Dropdown, Button, Spin, message } from 'a
 import {
   DashboardOutlined,
   AlertOutlined,
+  BellOutlined,
   FileTextOutlined,
+  BarChartOutlined,
   HeartOutlined,
   SettingOutlined,
   UserOutlined,
   LogoutOutlined,
+  TeamOutlined,
+  AuditOutlined,
+  BlockOutlined,
 } from '@ant-design/icons';
 import Dashboard from './pages/Dashboard';
 import RiskEvents from './pages/RiskEvents';
 import RuleManagement from './pages/RuleManagement';
 import SystemStatus from './pages/SystemStatus';
 import LoginPage from './pages/LoginPage';
-import { getHealth, getCurrentUser, getToken, removeToken, AuthUser } from './api';
+import AlertManagement from './pages/AlertManagement';
+import ReportCenter from './pages/ReportCenter';
+import UserManagement from './pages/UserManagement';
+import AuditLog from './pages/AuditLog';
+import TransactionExplorer from './pages/TransactionExplorer';
+import { getHealth, getCurrentUser, getToken, removeToken, getAlertStats, wsClient, AuthUser, ROLE_LABELS } from './api';
 import './App.css';
 
 const { Header, Content, Sider } = Layout;
 
+// ==================== RBAC 菜单配置 ====================
+
+interface MenuItem {
+  key: string;
+  path: string;
+  icon: React.ReactNode;
+  label: string;
+  roles?: string[]; // 为空表示所有角色可见
+}
+
+const ALL_MENU_ITEMS: MenuItem[] = [
+  { key: 'dashboard', path: '/', icon: <DashboardOutlined />, label: '仪表板' },
+  { key: 'risks', path: '/risks', icon: <AlertOutlined />, label: '风险事件' },
+  { key: 'alerts', path: '/alerts', icon: <BellOutlined />, label: '告警管理' },
+  { key: 'explorer', path: '/explorer', icon: <BlockOutlined />, label: '交易浏览器' },
+  { key: 'reports', path: '/reports', icon: <BarChartOutlined />, label: '报告中心' },
+  { key: 'rules', path: '/rules', icon: <FileTextOutlined />, label: '规则管理', roles: ['admin', 'analyst', 'developer'] },
+  { key: 'users', path: '/users', icon: <TeamOutlined />, label: '用户管理', roles: ['admin'] },
+  { key: 'audit', path: '/audit', icon: <AuditOutlined />, label: '审计日志', roles: ['admin', 'operator'] },
+  { key: 'system', path: '/system', icon: <SettingOutlined />, label: '系统状态', roles: ['admin', 'operator'] },
+];
+
+// 根据角色过滤菜单
+function getMenuForRole(role: string): MenuItem[] {
+  return ALL_MENU_ITEMS.filter((item) => {
+    if (!item.roles) return true; // 无角色限制 => 所有人可见
+    if (role === 'admin') return true; // admin 看到一切
+    return item.roles.includes(role);
+  });
+}
+
 // ==================== 导航菜单 ====================
 
-const NavigationMenu: React.FC = () => {
-  const location = useLocation();
+interface NavigationMenuProps {
+  role: string;
+  pendingAlerts: number;
+}
 
-  const pathToKey: Record<string, string> = {
-    '/': 'dashboard',
-    '/risks': 'risks',
-    '/rules': 'rules',
-    '/system': 'system',
-  };
+const NavigationMenu: React.FC<NavigationMenuProps> = ({ role, pendingAlerts }) => {
+  const location = useLocation();
+  const menuItems = getMenuForRole(role);
+
+  const pathToKey: Record<string, string> = {};
+  menuItems.forEach((item) => {
+    pathToKey[item.path] = item.key;
+  });
 
   const selectedKey = pathToKey[location.pathname] || 'dashboard';
 
@@ -39,28 +84,18 @@ const NavigationMenu: React.FC = () => {
       mode="inline"
       selectedKeys={[selectedKey]}
       style={{ height: '100%', borderRight: 0 }}
-      items={[
-        {
-          key: 'dashboard',
-          icon: <DashboardOutlined />,
-          label: <Link to="/">仪表板</Link>,
-        },
-        {
-          key: 'risks',
-          icon: <AlertOutlined />,
-          label: <Link to="/risks">风险事件</Link>,
-        },
-        {
-          key: 'rules',
-          icon: <FileTextOutlined />,
-          label: <Link to="/rules">规则管理</Link>,
-        },
-        {
-          key: 'system',
-          icon: <SettingOutlined />,
-          label: <Link to="/system">系统状态</Link>,
-        },
-      ]}
+      items={menuItems.map((item) => ({
+        key: item.key,
+        icon: item.icon,
+        label: (
+          <Link to={item.path}>
+            {item.label}
+            {item.key === 'alerts' && pendingAlerts > 0 && (
+              <Badge count={pendingAlerts} size="small" style={{ marginLeft: 8 }} />
+            )}
+          </Link>
+        ),
+      }))}
     />
   );
 };
@@ -71,15 +106,18 @@ interface MainLayoutProps {
   user: AuthUser;
   onLogout: () => void;
   systemOk: boolean | null;
+  pendingAlerts: number;
 }
 
-const MainLayout: React.FC<MainLayoutProps> = ({ user, onLogout, systemOk }) => {
+const MainLayout: React.FC<MainLayoutProps> = ({ user, onLogout, systemOk, pendingAlerts }) => {
+  const roleLabel = ROLE_LABELS[user.role] || user.role;
+
   const userMenuItems = [
     {
       key: 'info',
       label: (
         <span style={{ color: '#999' }}>
-          {user.role === 'admin' ? '管理员' : '用户'} · {user.email}
+          {roleLabel} · {user.email}
         </span>
       ),
       disabled: true,
@@ -100,6 +138,15 @@ const MainLayout: React.FC<MainLayoutProps> = ({ user, onLogout, systemOk }) => 
           <HeartOutlined style={{ marginRight: 8 }} /> SCRRMS - 智能合约运行时风险监控系统
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {/* 未读告警 Badge */}
+          {pendingAlerts > 0 && (
+            <Link to="/alerts">
+              <Badge count={pendingAlerts} overflowCount={99}>
+                <BellOutlined style={{ color: '#fff', fontSize: 18 }} />
+              </Badge>
+            </Link>
+          )}
+
           <Tooltip title={systemOk === null ? '检查中...' : systemOk ? '系统正常' : '系统异常'}>
             <Badge
               status={systemOk === null ? 'processing' : systemOk ? 'success' : 'error'}
@@ -119,14 +166,19 @@ const MainLayout: React.FC<MainLayoutProps> = ({ user, onLogout, systemOk }) => 
       </Header>
       <Layout>
         <Sider width={200} theme="light">
-          <NavigationMenu />
+          <NavigationMenu role={user.role} pendingAlerts={pendingAlerts} />
         </Sider>
         <Layout style={{ padding: '24px' }}>
           <Content style={{ background: '#fff', padding: 24, margin: 0, minHeight: 280, borderRadius: 6 }}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/risks" element={<RiskEvents />} />
+              <Route path="/alerts" element={<AlertManagement />} />
+              <Route path="/explorer" element={<TransactionExplorer />} />
+              <Route path="/reports" element={<ReportCenter />} />
               <Route path="/rules" element={<RuleManagement />} />
+              <Route path="/users" element={<UserManagement />} />
+              <Route path="/audit" element={<AuditLog />} />
               <Route path="/system" element={<SystemStatus />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
@@ -143,6 +195,7 @@ const App: React.FC = () => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [systemOk, setSystemOk] = useState<boolean | null>(null);
+  const [pendingAlerts, setPendingAlerts] = useState(0);
 
   // 检查是否已登录
   const checkAuth = useCallback(async () => {
@@ -183,6 +236,68 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // 轮询未读告警数
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchPendingAlerts = async () => {
+      try {
+        const res = await getAlertStats();
+        if (res.data.success) {
+          setPendingAlerts(res.data.data.pending_count || 0);
+        }
+      } catch {
+        // 忽略
+      }
+    };
+
+    fetchPendingAlerts();
+    const interval = setInterval(fetchPendingAlerts, 15000);
+    return () => clearInterval(interval);
+  }, [user]);
+
+  // 浏览器通知 + WebSocket 实时告警
+  useEffect(() => {
+    if (!user) return;
+
+    // 请求浏览器通知权限
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+
+    wsClient.connect();
+    const unsubscribe = wsClient.onMessage((event) => {
+      // 更新未读告警数
+      setPendingAlerts((prev) => prev + 1);
+
+      // 浏览器通知
+      if ('Notification' in window && Notification.permission === 'granted') {
+        const severityLabel: Record<string, string> = {
+          critical: '🔴 严重', high: '🟠 高危', medium: '🔵 中危', low: '🟢 低危',
+        };
+        const title = `${severityLabel[event.severity] || event.severity} 风险告警`;
+        const body = `${event.event_type}\n${event.description || ''}`.slice(0, 100);
+        try {
+          const notification = new Notification(title, {
+            body,
+            icon: '/favicon.ico',
+            tag: `risk-${event.id}`, // 同 tag 去重
+          });
+          notification.onclick = () => {
+            window.focus();
+            notification.close();
+          };
+          // 5秒后自动关闭
+          setTimeout(() => notification.close(), 5000);
+        } catch { /* iOS Safari 不支持 new Notification */ }
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [user]);
+
   const handleLoginSuccess = () => {
     checkAuth();
   };
@@ -193,7 +308,6 @@ const App: React.FC = () => {
     message.success('已退出登录');
   };
 
-  // 还在检查登录状态 —— 显示全屏 loading 而不是空白
   if (!authChecked) {
     return (
       <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -205,7 +319,7 @@ const App: React.FC = () => {
   return (
     <Router>
       {user ? (
-        <MainLayout user={user} onLogout={handleLogout} systemOk={systemOk} />
+        <MainLayout user={user} onLogout={handleLogout} systemOk={systemOk} pendingAlerts={pendingAlerts} />
       ) : (
         <Routes>
           <Route path="/login" element={<LoginPage onLoginSuccess={handleLoginSuccess} />} />

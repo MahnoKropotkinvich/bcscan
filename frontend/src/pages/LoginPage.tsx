@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Card, Form, Input, Button, message, Tabs, Typography } from 'antd';
-import { UserOutlined, LockOutlined, MailOutlined } from '@ant-design/icons';
-import { login, register, setToken } from '../api';
+import { Card, Form, Input, Button, message, Tabs, Typography, Select } from 'antd';
+import { UserOutlined, LockOutlined, MailOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
+import { login, register, setToken, ROLE_LABELS } from '../api';
 
 const { Title } = Typography;
 
@@ -30,7 +30,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     }
   };
 
-  const handleRegister = async (values: { username: string; email: string; password: string; confirm: string }) => {
+  const handleRegister = async (values: { username: string; email: string; password: string; confirm: string; role?: string }) => {
     if (values.password !== values.confirm) {
       message.error('两次输入的密码不一致');
       return;
@@ -41,6 +41,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         username: values.username,
         email: values.email,
         password: values.password,
+        role: values.role,
       });
       if (res.data.success) {
         message.success('注册成功，请登录');
@@ -131,6 +132,16 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     rules={[{ required: true, message: '请确认密码' }]}
                   >
                     <Input.Password prefix={<LockOutlined />} placeholder="确认密码" />
+                  </Form.Item>
+                  <Form.Item name="role" initialValue="user">
+                    <Select
+                      prefix={<SafetyCertificateOutlined />}
+                      placeholder="选择角色"
+                    >
+                      {Object.entries(ROLE_LABELS).map(([k, v]) => (
+                        <Select.Option key={k} value={k}>{v}</Select.Option>
+                      ))}
+                    </Select>
                   </Form.Item>
                   <Form.Item>
                     <Button type="primary" htmlType="submit" loading={loading} block>

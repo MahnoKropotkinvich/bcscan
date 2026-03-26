@@ -314,7 +314,10 @@ func (s *RDSService) processTransaction(ctx context.Context, msg *kafkago.Messag
 		return err
 	}
 
-	// 6. 处理风险事件
+	// 6. 持久化完整交易数据到 DB（用于交易浏览器）
+	go s.saveTransactionToDB(ctx, &txData)
+
+	// 7. 处理风险事件
 	for _, event := range events {
 		var matchedRule *ruleengine.Rule
 		for _, rule := range rules {
@@ -350,4 +353,24 @@ func (s *RDSService) processTransaction(ctx context.Context, msg *kafkago.Messag
 	}
 
 	return nil
+}
+
+// saveTransactionToDB 异步保存完整交易数据到 transactions 表（供交易浏览器查询）
+func (s *RDSService) saveTransactionToDB(ctx context.Context, txData *types.TransactionData) {
+	callStackJSON, _ := json.Marshal(txData.CallStack)
+	eventsJSON, _ := json.Marshal(txData.Events)
+	ts := time.Unix(int64(txData.Timestamp), 0)
+
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO transactions (tx_hash, block_number, from_address, to_address, value, gas_price, gas_used,
+		    input_data, status, timestamp, function_selector, call_stack, events_data, gas_limit, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+		 ON CONFLICT DO NOTHING`,
+		txData.TxHash, txData.BlockNumber, txData.FromAddress, txData.ToAddress,
+		txData.Value, txData.GasPrice, txData.GasUsed,
+		txData.InputData, txData.Status, ts,
+		txData.FunctionSelector, callStackJSON, eventsJSON, txData.GasLimit)
+	if err != nil {
+		s.logger.Warn("Failed to save transaction to DB", zap.Error(err), zap.String("tx", txData.TxHash))
+	}
 }
