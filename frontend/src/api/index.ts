@@ -516,8 +516,12 @@ export const decodeFunctionSelector = (selector: string) => {
   return api.get<APIResponse<FunctionSignature[]>>(`/explorer/decode/${selector}`);
 };
 
-export const getRecentTransactions = (limit: number = 20) => {
-  return api.get<APIResponse<TxBrief[]>>('/explorer/recent', { params: { limit } });
+export const getRecentTransactions = (params?: { page?: number; page_size?: number }) => {
+  return api.get<PagedResult<TxBrief>>('/explorer/recent', { params });
+};
+
+export const getAlertsByTxHash = (hash: string) => {
+  return api.get<APIResponse<Alert[]>>(`/explorer/tx/${hash}/alerts`);
 };
 
 // ==================== WebSocket ====================

@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/haswell/bcscan/internal/ruleengine"
-	"github.com/haswell/bcscan/internal/types"
 )
 
 // ContractFunctionHook 合约函数调用钩子
@@ -22,13 +21,8 @@ func (h *ContractFunctionHook) Name() string {
 	return "contract_function_call"
 }
 
-func (h *ContractFunctionHook) Match(txData *types.TransactionData) bool {
-	// 匹配所有交易（包括纯 ETH 转账），让规则条件来过滤
-	return true
-}
-
-func (h *ContractFunctionHook) Execute(ctx *ruleengine.EvaluationContext, rules []*ruleengine.Rule) ([]*RiskEvent, error) {
-	var events []*RiskEvent
+func (h *ContractFunctionHook) Execute(ctx *ruleengine.EvaluationContext, rules []*ruleengine.Rule) ([]*DetectionResult, error) {
+	var results []*DetectionResult
 
 	for _, rule := range rules {
 		if !rule.Metadata.Enabled {
@@ -47,12 +41,12 @@ func (h *ContractFunctionHook) Execute(ctx *ruleengine.EvaluationContext, rules 
 		}
 
 		if matched {
-			event := h.createRiskEvent(rule, ctx)
-			events = append(events, event)
+			result := h.createDetectionResult(rule, ctx)
+			results = append(results, result)
 		}
 	}
 
-	return events, nil
+	return results, nil
 }
 
 func (h *ContractFunctionHook) hasHook(rule *ruleengine.Rule, hookName string) bool {
@@ -109,8 +103,8 @@ func (h *ContractFunctionHook) evaluateCondition(condition ruleengine.RuleCondit
 	return h.evaluator.Evaluate(expression, ctx)
 }
 
-func (h *ContractFunctionHook) createRiskEvent(rule *ruleengine.Rule, ctx *ruleengine.EvaluationContext) *RiskEvent {
-	event := &RiskEvent{
+func (h *ContractFunctionHook) createDetectionResult(rule *ruleengine.Rule, ctx *ruleengine.EvaluationContext) *DetectionResult {
+	result := &DetectionResult{
 		RuleID:   rule.Metadata.Name,
 		RuleName: rule.Metadata.Name,
 		Severity: rule.Config.Severity,
@@ -119,13 +113,13 @@ func (h *ContractFunctionHook) createRiskEvent(rule *ruleengine.Rule, ctx *rulee
 	}
 
 	if ctx.Transaction != nil {
-		event.TxHash = ctx.Transaction.TxHash
-		event.BlockNumber = uint64(ctx.Transaction.BlockNumber)
+		result.TxHash = ctx.Transaction.TxHash
+		result.BlockNumber = uint64(ctx.Transaction.BlockNumber)
 	}
 
 	for key, value := range ctx.ExtractedData {
-		event.Metadata[key] = value
+		result.Metadata[key] = value
 	}
 
-	return event
+	return result
 }

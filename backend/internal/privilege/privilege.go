@@ -1,4 +1,4 @@
-package profile
+package privilege
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/haswell/bcscan/internal/models"
 	"github.com/lib/pq"
 	"go.uber.org/zap"
 )
@@ -113,12 +114,12 @@ func (pr *PrivilegeRegistry) Load(ctx context.Context) error {
 }
 
 // CheckPrivilege 检查一次调用是否涉及特权操作
-// 返回权限检查结果
+// 直接使用 models.CallFrame，消除 CallFrameInfo 中间结构
 func (pr *PrivilegeRegistry) CheckPrivilege(
 	caller string,
 	contractAddress string,
 	functionSelector string,
-	callStack []CallFrameInfo,
+	callStack []models.CallFrame,
 ) *PrivilegeCheckResult {
 	pr.mu.RLock()
 	defer pr.mu.RUnlock()
@@ -145,15 +146,6 @@ func (pr *PrivilegeRegistry) CheckPrivilege(
 	result.CallerAuthorized = pr.isAuthorized(result.EffectiveCaller, entry)
 
 	return result
-}
-
-// CallFrameInfo 调用帧信息（精简版，从 types.CallFrame 转换而来）
-type CallFrameInfo struct {
-	Type  string // CALL, DELEGATECALL, STATICCALL, CREATE
-	From  string
-	To    string
-	Depth int
-	Input string // 用于提取 function selector
 }
 
 // findMatchingEntry 查找匹配的权限条目
@@ -189,7 +181,8 @@ func (pr *PrivilegeRegistry) findMatchingEntry(contractAddress, functionSelector
 }
 
 // analyzeCallChain 分析调用链，检测 delegatecall 和中间代理
-func (pr *PrivilegeRegistry) analyzeCallChain(callStack []CallFrameInfo, result *PrivilegeCheckResult) {
+// 直接使用 models.CallFrame
+func (pr *PrivilegeRegistry) analyzeCallChain(callStack []models.CallFrame, result *PrivilegeCheckResult) {
 	intermediaries := make(map[string]bool)
 
 	for _, frame := range callStack {
@@ -207,12 +200,7 @@ func (pr *PrivilegeRegistry) analyzeCallChain(callStack []CallFrameInfo, result 
 	}
 
 	// 如果调用链中有 delegatecall，有效调用者可能不是 tx.from
-	// 在 delegatecall 链中，msg.sender 会保持为外层调用者
-	// 但如果 EOA -> ContractA.delegatecall(ContractB.privilegedFunc())
-	// 那么在 ContractB 的视角中，msg.sender = ContractA，而非 EOA
-	// 对于检测目的，我们关注 tx.from（最外层 EOA）是否有权限
 	if len(callStack) > 0 {
-		// 检查 tx.from 是否是 EOA（没有在 callStack 中作为 to 出现）
 		if _, isContract := intermediaries[result.EffectiveCaller]; isContract {
 			result.CallerIsContract = true
 		}
@@ -259,15 +247,21 @@ func (pr *PrivilegeRegistry) RegisterPrivilege(ctx context.Context, entry *Privi
 	return pr.Load(ctx)
 }
 
+// PrivilegedAddressMarker 标记地址为特权地址的回调接口
+// 用于解耦 privilege 和 tracker 包
+type PrivilegedAddressMarker interface {
+	SetPrivileged(ctx context.Context, address string, roles []string) error
+}
+
 // AutoDetectOwnership 自动检测 OwnershipTransferred 事件并注册 owner
 // 当看到 OwnershipTransferred(oldOwner, newOwner) 事件时，更新权限表
-func (pr *PrivilegeRegistry) AutoDetectOwnership(ctx context.Context, contractAddress string, newOwner string, tracker *Tracker) error {
+func (pr *PrivilegeRegistry) AutoDetectOwnership(ctx context.Context, contractAddress string, newOwner string, marker PrivilegedAddressMarker) error {
 	addr := strings.ToLower(contractAddress)
 	owner := strings.ToLower(newOwner)
 
 	// 标记新 owner 为特权地址
-	if tracker != nil {
-		_ = tracker.SetPrivileged(ctx, owner, []string{"owner"})
+	if marker != nil {
+		_ = marker.SetPrivileged(ctx, owner, []string{"owner"})
 	}
 
 	// 更新该合约所有权限条目的授权地址（把 newOwner 加进去）

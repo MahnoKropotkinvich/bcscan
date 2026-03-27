@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +14,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/haswell/bcscan/internal/auth"
 	"github.com/haswell/bcscan/internal/cache"
+	"github.com/haswell/bcscan/internal/config"
+	"github.com/haswell/bcscan/internal/models"
 	"github.com/haswell/bcscan/internal/repository"
 	"github.com/haswell/bcscan/internal/ruleengine"
 	_ "github.com/lib/pq"
@@ -32,19 +33,29 @@ type Config struct {
 
 func loadConfig() *Config {
 	return &Config{
-		DatabaseURL: getEnv("DATABASE_URL", "postgres://bcscan:bcscan_password@postgres:5432/bcscan?sslmode=disable"),
-		Port:        getEnv("PORT", "8080"),
-		RedisAddr:   getEnv("REDIS_ADDR", "localhost:6379"),
-		RulesPath:   getEnv("RULES_PATH", "./rules/builtin"),
-		JWTSecret:   getEnv("JWT_SECRET", "bcscan-dev-secret-change-in-production"),
+		DatabaseURL: config.GetEnv("DATABASE_URL", "postgres://bcscan:bcscan_password@postgres:5432/bcscan?sslmode=disable"),
+		Port:        config.GetEnv("PORT", "8080"),
+		RedisAddr:   config.GetEnv("REDIS_ADDR", "localhost:6379"),
+		RulesPath:   config.GetEnv("RULES_PATH", "./rules/builtin"),
+		JWTSecret:   config.GetEnv("JWT_SECRET", "bcscan-dev-secret-change-in-production"),
 	}
 }
 
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+// getClientIP 获取客户端 IP
+func getClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
 	}
-	return defaultValue
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+	// 去掉端口
+	addr := r.RemoteAddr
+	if idx := strings.LastIndex(addr, ":"); idx != -1 {
+		return addr[:idx]
+	}
+	return addr
 }
 
 // WebSocket 升级器
@@ -212,6 +223,7 @@ func main() {
 	api.HandleFunc("/explorer/address/{address}/txs", getTransactionsByAddress(db)).Methods("GET")
 	api.HandleFunc("/explorer/address/{address}/summary", getAddressSummary(db)).Methods("GET")
 	api.HandleFunc("/explorer/tx/{hash}/risks", getRisksByTxHash(db)).Methods("GET")
+	api.HandleFunc("/explorer/tx/{hash}/alerts", getAlertsByTxHash(db)).Methods("GET")
 	api.HandleFunc("/explorer/decode/{selector}", decodeFunctionSelector(db)).Methods("GET")
 	api.HandleFunc("/explorer/recent", getRecentTransactions(db)).Methods("GET")
 
@@ -279,23 +291,6 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 
 func respondError(w http.ResponseWriter, status int, message string) {
 	respondJSON(w, status, APIResponse{Success: false, Error: message})
-}
-
-// getClientIP 获取客户端 IP
-func getClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
-	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
-	}
-	// 去掉端口
-	addr := r.RemoteAddr
-	if idx := strings.LastIndex(addr, ":"); idx != -1 {
-		return addr[:idx]
-	}
-	return addr
 }
 
 // ==================== Risk Events API ====================
@@ -738,41 +733,6 @@ func updateUserStatus(svc *auth.Service) http.HandlerFunc {
 
 // ==================== 告警管理 API ====================
 
-// Alert 告警模型
-type Alert struct {
-	ID             int64      `json:"id"`
-	RiskEventID    int64      `json:"risk_event_id"`
-	Title          string     `json:"title"`
-	Message        string     `json:"message"`
-	Severity       string     `json:"severity"`
-	Status         string     `json:"status"`
-	AssignedTo     *int64     `json:"assigned_to,omitempty"`
-	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
-	AcknowledgedBy *int64     `json:"acknowledged_by,omitempty"`
-	ResolvedAt     *time.Time `json:"resolved_at,omitempty"`
-	ResolvedBy     *int64     `json:"resolved_by,omitempty"`
-	Notes          *string    `json:"notes,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-
-	// 关联的风险事件信息
-	TxHash          string  `json:"tx_hash,omitempty"`
-	ContractAddress string  `json:"contract_address,omitempty"`
-	Score           float64 `json:"score,omitempty"`
-}
-
-// AlertHistory 告警处理历史
-type AlertHistory struct {
-	ID        int64     `json:"id"`
-	AlertID   int64     `json:"alert_id"`
-	UserID    *int64    `json:"user_id,omitempty"`
-	Username  string    `json:"username,omitempty"`
-	Action    string    `json:"action"`
-	OldStatus string    `json:"old_status,omitempty"`
-	NewStatus string    `json:"new_status,omitempty"`
-	Note      string    `json:"note,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
 func getAlerts(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := r.URL.Query().Get("status")
@@ -830,9 +790,9 @@ func getAlerts(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		var alerts []Alert
+		var alerts []models.Alert
 		for rows.Next() {
-			var a Alert
+			var a models.Alert
 			if err := rows.Scan(&a.ID, &a.RiskEventID, &a.Title, &a.Message, &a.Severity, &a.Status,
 				&a.AssignedTo, &a.AcknowledgedAt, &a.AcknowledgedBy, &a.ResolvedAt, &a.ResolvedBy,
 				&a.Notes, &a.CreatedAt,
@@ -842,7 +802,7 @@ func getAlerts(db *sql.DB) http.HandlerFunc {
 			alerts = append(alerts, a)
 		}
 		if alerts == nil {
-			alerts = []Alert{}
+			alerts = []models.Alert{}
 		}
 
 		respondJSON(w, http.StatusOK, map[string]interface{}{
@@ -899,7 +859,7 @@ func getAlertDetail(db *sql.DB) http.HandlerFunc {
 		}
 
 		// 查询告警
-		var a Alert
+		var a models.Alert
 		err = db.QueryRowContext(r.Context(),
 			`SELECT a.id, a.risk_event_id, a.title, COALESCE(a.message,''), a.severity, a.status,
 			        a.assigned_to, a.acknowledged_at, a.acknowledged_by, a.resolved_at, a.resolved_by,
@@ -925,11 +885,11 @@ func getAlertDetail(db *sql.DB) http.HandlerFunc {
 			 LEFT JOIN users u ON h.user_id = u.id
 			 WHERE h.alert_id = $1 ORDER BY h.created_at`, id)
 
-		var history []AlertHistory
+		var history []models.AlertHistory
 		if histRows != nil {
 			defer histRows.Close()
 			for histRows.Next() {
-				var h AlertHistory
+				var h models.AlertHistory
 				if err := histRows.Scan(&h.ID, &h.AlertID, &h.UserID, &h.Username, &h.Action,
 					&h.OldStatus, &h.NewStatus, &h.Note, &h.CreatedAt); err != nil {
 					continue
@@ -938,7 +898,7 @@ func getAlertDetail(db *sql.DB) http.HandlerFunc {
 			}
 		}
 		if history == nil {
-			history = []AlertHistory{}
+			history = []models.AlertHistory{}
 		}
 
 		respondJSON(w, http.StatusOK, APIResponse{Success: true, Data: map[string]interface{}{
@@ -1404,32 +1364,11 @@ func getAuditActions(svc *auth.Service) http.HandlerFunc {
 
 // ==================== 交易浏览器 API ====================
 
-// ExplorerTransaction 交易浏览器数据模型
-type ExplorerTransaction struct {
-	TxHash           string          `json:"tx_hash"`
-	BlockNumber      int64           `json:"block_number"`
-	FromAddress      string          `json:"from_address"`
-	ToAddress        string          `json:"to_address"`
-	Value            string          `json:"value"`
-	GasPrice         int64           `json:"gas_price"`
-	GasUsed          int64           `json:"gas_used"`
-	GasLimit         *int64          `json:"gas_limit,omitempty"`
-	InputData        *string         `json:"input_data,omitempty"`
-	FunctionSelector *string         `json:"function_selector,omitempty"`
-	FunctionName     *string         `json:"function_name,omitempty"`
-	FunctionDesc     *string         `json:"function_desc,omitempty"`
-	Status           int16           `json:"status"`
-	Timestamp        time.Time       `json:"timestamp"`
-	CallStack        json.RawMessage `json:"call_stack,omitempty"`
-	EventsData       json.RawMessage `json:"events_data,omitempty"`
-	RiskCount        int             `json:"risk_count"`
-}
-
 func getTransactionByHash(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		hash := mux.Vars(r)["hash"]
 
-		var tx ExplorerTransaction
+		var tx models.ExplorerTransaction
 		var callStack, eventsData, inputData, funcSel sql.NullString
 		var gasLimit sql.NullInt64
 
@@ -1550,22 +1489,9 @@ func getTransactionsByAddress(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		type TxSummary struct {
-			TxHash           string    `json:"tx_hash"`
-			BlockNumber      int64     `json:"block_number"`
-			FromAddress      string    `json:"from_address"`
-			ToAddress        string    `json:"to_address"`
-			Value            string    `json:"value"`
-			GasUsed          int64     `json:"gas_used"`
-			FunctionSelector *string   `json:"function_selector,omitempty"`
-			FunctionName     *string   `json:"function_name,omitempty"`
-			Status           int16     `json:"status"`
-			Timestamp        time.Time `json:"timestamp"`
-		}
-
-		var txs []TxSummary
+		var txs []models.TxSummary
 		for rows.Next() {
-			var t TxSummary
+			var t models.TxSummary
 			var funcSel sql.NullString
 			if err := rows.Scan(&t.TxHash, &t.BlockNumber, &t.FromAddress, &t.ToAddress,
 				&t.Value, &t.GasUsed, &funcSel, &t.Status, &t.Timestamp); err != nil {
@@ -1584,7 +1510,7 @@ func getTransactionsByAddress(db *sql.DB) http.HandlerFunc {
 			txs = append(txs, t)
 		}
 		if txs == nil {
-			txs = []TxSummary{}
+			txs = []models.TxSummary{}
 		}
 
 		respondJSON(w, http.StatusOK, map[string]interface{}{
@@ -1662,20 +1588,9 @@ func getRisksByTxHash(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		type RiskSummary struct {
-			ID              int       `json:"id"`
-			EventType       string    `json:"event_type"`
-			Severity        string    `json:"severity"`
-			ContractAddress string    `json:"contract_address"`
-			TxHash          string    `json:"tx_hash"`
-			Description     string    `json:"description"`
-			Score           float64   `json:"score"`
-			DetectedAt      time.Time `json:"detected_at"`
-		}
-
-		var risks []RiskSummary
+		var risks []models.RiskEvent
 		for rows.Next() {
-			var r RiskSummary
+			var r models.RiskEvent
 			if err := rows.Scan(&r.ID, &r.EventType, &r.Severity, &r.ContractAddress,
 				&r.TxHash, &r.Description, &r.Score, &r.DetectedAt); err != nil {
 				continue
@@ -1683,7 +1598,7 @@ func getRisksByTxHash(db *sql.DB) http.HandlerFunc {
 			risks = append(risks, r)
 		}
 		if risks == nil {
-			risks = []RiskSummary{}
+			risks = []models.RiskEvent{}
 		}
 
 		respondJSON(w, http.StatusOK, APIResponse{Success: true, Data: risks})
@@ -1706,18 +1621,9 @@ func decodeFunctionSelector(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		type FuncSig struct {
-			Selector     string `json:"selector"`
-			Signature    string `json:"signature"`
-			Name         string `json:"name"`
-			Category     string `json:"category"`
-			Description  string `json:"description"`
-			IsPrivileged bool   `json:"is_privileged"`
-		}
-
-		var sigs []FuncSig
+		var sigs []models.FuncSig
 		for rows.Next() {
-			var s FuncSig
+			var s models.FuncSig
 			if err := rows.Scan(&s.Selector, &s.Signature, &s.Name, &s.Category,
 				&s.Description, &s.IsPrivileged); err != nil {
 				continue
@@ -1725,7 +1631,7 @@ func decodeFunctionSelector(db *sql.DB) http.HandlerFunc {
 			sigs = append(sigs, s)
 		}
 		if sigs == nil {
-			sigs = []FuncSig{}
+			sigs = []models.FuncSig{}
 		}
 
 		respondJSON(w, http.StatusOK, APIResponse{Success: true, Data: sigs})
@@ -1734,37 +1640,40 @@ func decodeFunctionSelector(db *sql.DB) http.HandlerFunc {
 
 func getRecentTransactions(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		limit := parseIntDefault(r.URL.Query().Get("limit"), 20)
-		if limit > 100 {
-			limit = 100
+		page := parseIntDefault(r.URL.Query().Get("page"), 1)
+		pageSize := parseIntDefault(r.URL.Query().Get("page_size"), 20)
+		if pageSize > 100 {
+			pageSize = 100
+		}
+
+		// 兼容旧的 limit 参数
+		if r.URL.Query().Get("limit") != "" && r.URL.Query().Get("page") == "" {
+			pageSize = parseIntDefault(r.URL.Query().Get("limit"), 20)
+		}
+
+		// 总数
+		var total int
+		db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM transactions").Scan(&total)
+
+		offset := (page - 1) * pageSize
+		pages := total / pageSize
+		if total%pageSize > 0 {
+			pages++
 		}
 
 		rows, err := db.QueryContext(r.Context(),
 			`SELECT tx_hash, block_number, from_address, COALESCE(to_address,''),
 			        COALESCE(value::text,'0'), COALESCE(gas_used,0), function_selector, status, timestamp
-			 FROM transactions ORDER BY timestamp DESC LIMIT $1`, limit)
+			 FROM transactions ORDER BY timestamp DESC LIMIT $1 OFFSET $2`, pageSize, offset)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		defer rows.Close()
 
-		type TxBrief struct {
-			TxHash           string    `json:"tx_hash"`
-			BlockNumber      int64     `json:"block_number"`
-			FromAddress      string    `json:"from_address"`
-			ToAddress        string    `json:"to_address"`
-			Value            string    `json:"value"`
-			GasUsed          int64     `json:"gas_used"`
-			FunctionSelector *string   `json:"function_selector,omitempty"`
-			FunctionName     *string   `json:"function_name,omitempty"`
-			Status           int16     `json:"status"`
-			Timestamp        time.Time `json:"timestamp"`
-		}
-
-		var txs []TxBrief
+		var txs []models.TxBrief
 		for rows.Next() {
-			var t TxBrief
+			var t models.TxBrief
 			var funcSel sql.NullString
 			if err := rows.Scan(&t.TxHash, &t.BlockNumber, &t.FromAddress, &t.ToAddress,
 				&t.Value, &t.GasUsed, &funcSel, &t.Status, &t.Timestamp); err != nil {
@@ -1783,10 +1692,54 @@ func getRecentTransactions(db *sql.DB) http.HandlerFunc {
 			txs = append(txs, t)
 		}
 		if txs == nil {
-			txs = []TxBrief{}
+			txs = []models.TxBrief{}
 		}
 
-		respondJSON(w, http.StatusOK, APIResponse{Success: true, Data: txs})
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"items":     txs,
+			"total":     total,
+			"page":      page,
+			"page_size": pageSize,
+			"pages":     pages,
+		})
+	}
+}
+
+func getAlertsByTxHash(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		hash := mux.Vars(r)["hash"]
+
+		rows, err := db.QueryContext(r.Context(),
+			`SELECT a.id, a.risk_event_id, a.title, COALESCE(a.message,''), a.severity, a.status,
+			        a.assigned_to, a.acknowledged_at, a.acknowledged_by, a.resolved_at, a.resolved_by,
+			        a.notes, a.created_at,
+			        COALESCE(r.tx_hash,''), COALESCE(r.contract_address,''), COALESCE(r.score,0)
+			 FROM alerts a
+			 JOIN risk_events r ON a.risk_event_id = r.id
+			 WHERE r.tx_hash = $1
+			 ORDER BY a.created_at DESC`, hash)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		defer rows.Close()
+
+		var alerts []models.Alert
+		for rows.Next() {
+			var a models.Alert
+			if err := rows.Scan(&a.ID, &a.RiskEventID, &a.Title, &a.Message, &a.Severity, &a.Status,
+				&a.AssignedTo, &a.AcknowledgedAt, &a.AcknowledgedBy, &a.ResolvedAt, &a.ResolvedBy,
+				&a.Notes, &a.CreatedAt,
+				&a.TxHash, &a.ContractAddress, &a.Score); err != nil {
+				continue
+			}
+			alerts = append(alerts, a)
+		}
+		if alerts == nil {
+			alerts = []models.Alert{}
+		}
+
+		respondJSON(w, http.StatusOK, APIResponse{Success: true, Data: alerts})
 	}
 }
 

@@ -8,8 +8,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/haswell/bcscan/internal/config"
 	"github.com/haswell/bcscan/internal/kafka"
-	btypes "github.com/haswell/bcscan/internal/types"
+	"github.com/haswell/bcscan/internal/models"
 	"go.uber.org/zap"
 	"math/big"
 )
@@ -50,17 +51,10 @@ type Config struct {
 
 func loadConfig() *Config {
 	return &Config{
-		EthNodeURL:  getEnv("ETH_NODE_URL", "ws://ganache:8545"),
-		KafkaBroker: getEnv("KAFKA_BROKER", "redpanda:9092"),
-		KafkaTopic:  getEnv("KAFKA_TOPIC", "blockchain.transactions"),
+		EthNodeURL:  config.GetEnv("ETH_NODE_URL", "ws://ganache:8545"),
+		KafkaBroker: config.GetEnv("KAFKA_BROKER", "redpanda:9092"),
+		KafkaTopic:  config.GetEnv("KAFKA_TOPIC", "blockchain.transactions"),
 	}
-}
-
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }
 
 func waitForShutdown(logger *zap.Logger) {
@@ -128,7 +122,7 @@ func processTransaction(ctx context.Context, client *ethclient.Client, producer 
 	logEvent(logger, txData)
 }
 
-func logEvent(logger *zap.Logger, txData *btypes.TransactionData) {
+func logEvent(logger *zap.Logger, txData *models.TransactionData) {
 	logger.Info("Transaction processed",
 		zap.String("tx_hash", txData.TxHash),
 		zap.Int("call_stack_depth", len(txData.CallStack)),

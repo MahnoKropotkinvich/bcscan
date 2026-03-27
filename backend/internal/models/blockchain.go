@@ -1,4 +1,4 @@
-package types
+package models
 
 // TransactionData 完整的交易数据（Kafka 消息格式）
 // 统一用于 RMS 发送和 RDS 接收

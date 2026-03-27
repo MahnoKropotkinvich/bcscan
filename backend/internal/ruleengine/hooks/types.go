@@ -2,18 +2,16 @@ package hooks
 
 import (
 	"github.com/haswell/bcscan/internal/ruleengine"
-	"github.com/haswell/bcscan/internal/types"
 )
 
 // Hook 钩子接口
 type Hook interface {
 	Name() string
-	Match(txData *types.TransactionData) bool
-	Execute(ctx *ruleengine.EvaluationContext, rules []*ruleengine.Rule) ([]*RiskEvent, error)
+	Execute(ctx *ruleengine.EvaluationContext, rules []*ruleengine.Rule) ([]*DetectionResult, error)
 }
 
-// RiskEvent 风险事件（Hook 检测结果）
-type RiskEvent struct {
+// DetectionResult Hook 检测结果（原 RiskEvent，重命名避免与 models.RiskEvent 混淆）
+type DetectionResult struct {
 	RuleID      string
 	RuleName    string
 	Severity    string

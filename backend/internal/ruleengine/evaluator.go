@@ -201,7 +201,7 @@ func (e *Evaluator) getValue(varName string, ctx *EvaluationContext) (interface{
 		return false, nil
 	case "intermediary_count":
 		if ctx.PrivilegeCheck != nil {
-			return ctx.PrivilegeCheck.IntermediaryCount, nil
+			return len(ctx.PrivilegeCheck.IntermediaryContracts), nil
 		}
 		return 0, nil
 	}

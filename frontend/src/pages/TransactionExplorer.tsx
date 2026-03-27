@@ -7,11 +7,13 @@ import {
   SearchOutlined, SwapOutlined, CodeOutlined, LinkOutlined,
   WarningOutlined, BlockOutlined, ArrowRightOutlined,
   FunctionOutlined, BranchesOutlined, ApiOutlined,
+  BellOutlined,
 } from '@ant-design/icons';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   getTransactionByHash, getTransactionsByAddress, getAddressSummary,
-  getRisksByTxHash, getRecentTransactions,
-  ExplorerTransaction, TxBrief, AddressSummary, RiskEvent, CallFrame,
+  getRisksByTxHash, getRecentTransactions, getAlertsByTxHash,
+  ExplorerTransaction, TxBrief, AddressSummary, RiskEvent, CallFrame, Alert,
 } from '../api';
 
 const { Search } = Input;
@@ -55,7 +57,6 @@ const CallTraceNode: React.FC<CallTraceNodeProps> = ({ frame, index, onAddressCl
   const hasError = !!frame.error;
   const valueStr = weiToEth(frame.value);
 
-  // 函数显示名
   const funcDisplay = frame.function_name
     ? frame.function_name
     : frame.function && frame.function.length >= 10
@@ -76,27 +77,16 @@ const CallTraceNode: React.FC<CallTraceNodeProps> = ({ frame, index, onAddressCl
         transition: 'background 0.2s',
       }}
     >
-      {/* 第一行: 类型 + 函数名 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        {/* 序号 */}
         <span style={{ color: '#bbb', fontSize: 11, minWidth: 20 }}>#{index}</span>
-
-        {/* 调用类型 */}
         <Tag
           style={{
-            color: style.color,
-            background: style.bg,
-            border: `1px solid ${style.border}`,
-            fontWeight: 600,
-            fontSize: 11,
-            lineHeight: '18px',
-            padding: '0 6px',
+            color: style.color, background: style.bg, border: `1px solid ${style.border}`,
+            fontWeight: 600, fontSize: 11, lineHeight: '18px', padding: '0 6px',
           }}
         >
           {frame.type || 'CALL'}
         </Tag>
-
-        {/* 函数名/selector */}
         {funcDisplay && (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <FunctionOutlined style={{ color: '#722ed1', fontSize: 12 }} />
@@ -111,28 +101,18 @@ const CallTraceNode: React.FC<CallTraceNodeProps> = ({ frame, index, onAddressCl
             )}
           </span>
         )}
-
-        {/* 错误 */}
-        {hasError && (
-          <Tag color="error" style={{ margin: 0 }}>{frame.error}</Tag>
-        )}
-
-        {/* Value */}
+        {hasError && <Tag color="error" style={{ margin: 0 }}>{frame.error}</Tag>}
         {valueStr && (
           <span style={{ color: '#cf1322', fontWeight: 500, fontSize: 12 }}>
             [{valueStr}]
           </span>
         )}
-
-        {/* Gas */}
         {frame.gas_used > 0 && (
           <span style={{ color: '#999', fontSize: 11 }}>
             gas: {frame.gas_used.toLocaleString()}
           </span>
         )}
       </div>
-
-      {/* 第二行: From → To */}
       <div style={{ marginTop: 3, display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
         {frame.from && (
           <Tooltip title={frame.from}>
@@ -155,8 +135,6 @@ const CallTraceNode: React.FC<CallTraceNodeProps> = ({ frame, index, onAddressCl
         ) : (
           <Text type="secondary" style={{ fontSize: 12 }}>[Contract Creation]</Text>
         )}
-
-        {/* 函数描述 */}
         {frame.function_desc && (
           <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
             — {frame.function_desc}
@@ -173,7 +151,6 @@ interface CallTraceTreeProps {
 }
 
 const CallTraceTree: React.FC<CallTraceTreeProps> = ({ frames, onAddressClick }) => {
-  // 统计
   const maxDepth = Math.max(0, ...frames.map(f => f.depth));
   const callTypes = new Set(frames.map(f => f.type).filter(Boolean));
   const errorCount = frames.filter(f => f.error).length;
@@ -181,7 +158,6 @@ const CallTraceTree: React.FC<CallTraceTreeProps> = ({ frames, onAddressClick })
 
   return (
     <div>
-      {/* 统计栏 */}
       <div style={{
         display: 'flex', gap: 16, marginBottom: 12, padding: '8px 12px',
         background: '#f5f5f5', borderRadius: 4, fontSize: 12, color: '#666',
@@ -197,15 +173,9 @@ const CallTraceTree: React.FC<CallTraceTreeProps> = ({ frames, onAddressClick })
         {namedFunctions > 0 && <span><FunctionOutlined /> 已识别函数: {namedFunctions}/{frames.length}</span>}
         {errorCount > 0 && <span style={{ color: '#cf1322' }}>Errors: {errorCount}</span>}
       </div>
-
-      {/* 调用树 */}
       <div style={{
-        border: '1px solid #f0f0f0',
-        borderRadius: 4,
-        padding: '8px 8px',
-        maxHeight: 500,
-        overflow: 'auto',
-        background: '#fff',
+        border: '1px solid #f0f0f0', borderRadius: 4, padding: '8px 8px',
+        maxHeight: 500, overflow: 'auto', background: '#fff',
       }}>
         {frames.map((frame, i) => (
           <CallTraceNode key={i} frame={frame} index={i} onAddressClick={onAddressClick} />
@@ -220,14 +190,23 @@ const CallTraceTree: React.FC<CallTraceTreeProps> = ({ frames, onAddressClick })
 interface TxDetailProps {
   tx: ExplorerTransaction;
   risks: RiskEvent[];
+  alerts: Alert[];
   onAddressClick?: (addr: string) => void;
+  onAlertClick?: (id: number) => void;
 }
 
-const TxDetailView: React.FC<TxDetailProps> = ({ tx, risks, onAddressClick }) => {
-  const severityColors: Record<string, string> = {
-    critical: 'red', high: 'orange', medium: 'blue', low: 'green',
-  };
+const severityColors: Record<string, string> = {
+  critical: 'red', high: 'orange', medium: 'blue', low: 'green',
+};
 
+const statusColors: Record<string, string> = {
+  pending: 'warning', acknowledged: 'processing', resolved: 'success', ignored: 'default',
+};
+const statusLabels: Record<string, string> = {
+  pending: '待处理', acknowledged: '已确认', resolved: '已解决', ignored: '已忽略',
+};
+
+const TxDetailView: React.FC<TxDetailProps> = ({ tx, risks, alerts, onAddressClick, onAlertClick }) => {
   return (
     <div>
       {/* 基本信息 */}
@@ -280,9 +259,43 @@ const TxDetailView: React.FC<TxDetailProps> = ({ tx, risks, onAddressClick }) =>
         </Descriptions>
       </Card>
 
-      {/* 风险关联 */}
+      {/* 关联告警 */}
+      {alerts.length > 0 && (
+        <Card title={<span><BellOutlined style={{ color: '#fa8c16', marginRight: 8 }} />关联告警 ({alerts.length})</span>}
+          size="small" style={{ marginBottom: 16 }}>
+          <Table
+            size="small" pagination={false} rowKey="id"
+            dataSource={alerts}
+            columns={[
+              { title: '告警标题', dataIndex: 'title', key: 'title', ellipsis: true },
+              {
+                title: '等级', dataIndex: 'severity', key: 'severity', width: 80,
+                render: (s: string) => <Tag color={severityColors[s]}>{s.toUpperCase()}</Tag>,
+              },
+              {
+                title: '状态', dataIndex: 'status', key: 'status', width: 90,
+                render: (s: string) => <Badge status={statusColors[s] as any} text={statusLabels[s] || s} />,
+              },
+              {
+                title: '分数', dataIndex: 'score', key: 'score', width: 70,
+                render: (s: number) => <span style={{ color: s >= 80 ? '#cf1322' : s >= 60 ? '#fa8c16' : '#1890ff', fontWeight: 'bold' }}>{s?.toFixed(1)}</span>,
+              },
+              {
+                title: '操作', key: 'op', width: 60,
+                render: (_: any, r: Alert) => (
+                  <Button type="link" size="small" onClick={() => onAlertClick?.(r.id)}>
+                    查看
+                  </Button>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
+
+      {/* 风险事件 */}
       {risks.length > 0 && (
-        <Card title={<span><WarningOutlined style={{ color: '#cf1322', marginRight: 8 }} />关联风险事件 ({risks.length})</span>}
+        <Card title={<span><WarningOutlined style={{ color: '#cf1322', marginRight: 8 }} />风险检测记录 ({risks.length})</span>}
           size="small" style={{ marginBottom: 16 }}>
           <Table
             size="small" pagination={false} rowKey="id"
@@ -303,18 +316,11 @@ const TxDetailView: React.FC<TxDetailProps> = ({ tx, risks, onAddressClick }) =>
         </Card>
       )}
 
-      {/* 调用栈（树状可视化） */}
+      {/* 调用栈 */}
       {tx.call_stack && tx.call_stack.length > 0 && (
         <Card
-          title={
-            <span>
-              <BranchesOutlined style={{ marginRight: 8 }} />
-              Internal Transactions (Call Trace)
-            </span>
-          }
-          size="small"
-          style={{ marginBottom: 16 }}
-        >
+          title={<span><BranchesOutlined style={{ marginRight: 8 }} />Internal Transactions (Call Trace)</span>}
+          size="small" style={{ marginBottom: 16 }}>
           <CallTraceTree frames={tx.call_stack} onAddressClick={onAddressClick} />
         </Card>
       )}
@@ -327,9 +333,7 @@ const TxDetailView: React.FC<TxDetailProps> = ({ tx, risks, onAddressClick }) =>
             label: (
               <Space>
                 <Badge count={i} style={{ backgroundColor: '#1677ff' }} />
-                <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                  {shortenAddr(evt.address)}
-                </Text>
+                <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{shortenAddr(evt.address)}</Text>
                 <Text type="secondary" style={{ fontSize: 11 }}>
                   {evt.topics?.length || 0} topics
                   {evt.data && evt.data !== '0x' ? ` · ${Math.max(0, (evt.data.length - 2) / 2)} bytes data` : ''}
@@ -368,10 +372,8 @@ const TxDetailView: React.FC<TxDetailProps> = ({ tx, risks, onAddressClick }) =>
           <div style={{
             background: '#1e1e1e', color: '#d4d4d4', padding: 16, borderRadius: 4,
             fontFamily: "'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace",
-            fontSize: 12, wordBreak: 'break-all', maxHeight: 200, overflow: 'auto',
-            lineHeight: 1.6,
+            fontSize: 12, wordBreak: 'break-all', maxHeight: 200, overflow: 'auto', lineHeight: 1.6,
           }}>
-            {/* 高亮前4字节(函数选择器) */}
             <span style={{ color: '#c586c0' }}>{tx.input_data.slice(0, 10)}</span>
             {tx.input_data.length > 10 && (
               <span>{tx.input_data.slice(10).match(/.{1,64}/g)?.map((chunk, i) => (
@@ -399,27 +401,43 @@ const TxDetailView: React.FC<TxDetailProps> = ({ tx, risks, onAddressClick }) =>
 // ==================== 主页面 ====================
 
 const TransactionExplorer: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [searchValue, setSearchValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [txDetail, setTxDetail] = useState<ExplorerTransaction | null>(null);
   const [txRisks, setTxRisks] = useState<RiskEvent[]>([]);
+  const [txAlerts, setTxAlerts] = useState<Alert[]>([]);
   const [addressTxs, setAddressTxs] = useState<TxBrief[]>([]);
   const [addressSummary, setAddressSummary] = useState<AddressSummary | null>(null);
   const [addressTotal, setAddressTotal] = useState(0);
   const [addressPage, setAddressPage] = useState(1);
   const [recentTxs, setRecentTxs] = useState<TxBrief[]>([]);
+  const [recentTotal, setRecentTotal] = useState(0);
+  const [recentPage, setRecentPage] = useState(1);
   const [viewMode, setViewMode] = useState<'home' | 'tx' | 'address'>('home');
 
-  const fetchRecent = useCallback(async () => {
+  const fetchRecent = useCallback(async (p: number = 1) => {
     try {
-      const res = await getRecentTransactions(15);
-      if (res.data.success) {
-        setRecentTxs(res.data.data || []);
-      }
+      const res = await getRecentTransactions({ page: p, page_size: 15 });
+      setRecentTxs(res.data.items || []);
+      setRecentTotal(res.data.total || 0);
+      setRecentPage(p);
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { fetchRecent(); }, [fetchRecent]);
+  // 处理 URL 参数跳转（从告警中心等页面跳入）
+  useEffect(() => {
+    const txParam = searchParams.get('tx');
+    const addrParam = searchParams.get('addr');
+    if (txParam) {
+      handleTxClick(txParam);
+    } else if (addrParam) {
+      handleAddressClick(addrParam);
+    } else {
+      fetchRecent();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSearch = async (value: string) => {
     if (!value.trim()) return;
@@ -427,57 +445,57 @@ const TransactionExplorer: React.FC = () => {
     setLoading(true);
 
     if (query.startsWith('0x') && query.length === 66) {
-      try {
-        const [txRes, riskRes] = await Promise.all([
-          getTransactionByHash(query),
-          getRisksByTxHash(query),
-        ]);
-        if (txRes.data.success) {
-          setTxDetail(txRes.data.data);
-          setTxRisks(riskRes.data.success ? riskRes.data.data || [] : []);
-          setViewMode('tx');
-        } else {
-          message.warning('未找到该交易');
-        }
-      } catch {
-        message.warning('未找到该交易');
-      }
+      await loadTxDetail(query);
     } else if (query.startsWith('0x') && query.length === 42) {
-      try {
-        const [txRes, sumRes] = await Promise.all([
-          getTransactionsByAddress(query, { page: 1, page_size: 15 }),
-          getAddressSummary(query),
-        ]);
-        setAddressTxs(txRes.data.items || []);
-        setAddressTotal(txRes.data.total || 0);
-        setAddressPage(1);
-        if (sumRes.data.success) setAddressSummary(sumRes.data.data);
-        setViewMode('address');
-      } catch {
-        message.warning('未找到该地址的交易');
-      }
+      await loadAddress(query);
     } else {
       message.warning('请输入有效的交易哈希(0x...66位)或地址(0x...42位)');
     }
     setLoading(false);
   };
 
-  const handleTxClick = async (hash: string) => {
-    setSearchValue(hash);
-    setLoading(true);
+  const loadTxDetail = async (hash: string) => {
     try {
-      const [txRes, riskRes] = await Promise.all([
+      const [txRes, riskRes, alertRes] = await Promise.all([
         getTransactionByHash(hash),
         getRisksByTxHash(hash),
+        getAlertsByTxHash(hash),
       ]);
       if (txRes.data.success) {
         setTxDetail(txRes.data.data);
         setTxRisks(riskRes.data.success ? riskRes.data.data || [] : []);
+        setTxAlerts(alertRes.data.success ? alertRes.data.data || [] : []);
         setViewMode('tx');
+        setSearchParams({ tx: hash }, { replace: true });
+      } else {
+        message.warning('未找到该交易');
       }
     } catch {
       message.warning('未找到该交易');
     }
+  };
+
+  const loadAddress = async (addr: string, page: number = 1) => {
+    try {
+      const [txRes, sumRes] = await Promise.all([
+        getTransactionsByAddress(addr, { page, page_size: 15 }),
+        getAddressSummary(addr),
+      ]);
+      setAddressTxs(txRes.data.items || []);
+      setAddressTotal(txRes.data.total || 0);
+      setAddressPage(page);
+      if (sumRes.data.success) setAddressSummary(sumRes.data.data);
+      setViewMode('address');
+      setSearchParams({ addr }, { replace: true });
+    } catch {
+      message.warning('未找到该地址的交易');
+    }
+  };
+
+  const handleTxClick = async (hash: string) => {
+    setSearchValue(hash);
+    setLoading(true);
+    await loadTxDetail(hash);
     setLoading(false);
   };
 
@@ -485,19 +503,7 @@ const TransactionExplorer: React.FC = () => {
     if (!addr || addr.length !== 42) return;
     setSearchValue(addr);
     setLoading(true);
-    try {
-      const [txRes, sumRes] = await Promise.all([
-        getTransactionsByAddress(addr, { page: 1, page_size: 15 }),
-        getAddressSummary(addr),
-      ]);
-      setAddressTxs(txRes.data.items || []);
-      setAddressTotal(txRes.data.total || 0);
-      setAddressPage(1);
-      if (sumRes.data.success) setAddressSummary(sumRes.data.data);
-      setViewMode('address');
-    } catch {
-      message.warning('未找到该地址的交易');
-    }
+    await loadAddress(addr);
     setLoading(false);
   };
 
@@ -508,6 +514,16 @@ const TransactionExplorer: React.FC = () => {
       setAddressTxs(res.data.items || []);
       setAddressPage(p);
     } catch { /* ignore */ }
+  };
+
+  const goBack = () => {
+    setViewMode('home');
+    setSearchParams({}, { replace: true });
+    fetchRecent(1);
+  };
+
+  const goToAlertCenter = (alertId?: number) => {
+    navigate('/alerts');
   };
 
   const txColumns = [
@@ -586,14 +602,15 @@ const TransactionExplorer: React.FC = () => {
         <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" tip="查询中..." /></div>
       ) : viewMode === 'tx' && txDetail ? (
         <div>
-          <Button type="link" onClick={() => setViewMode('home')} style={{ marginBottom: 16 }}>
+          <Button type="link" onClick={goBack} style={{ marginBottom: 16 }}>
             ← 返回
           </Button>
-          <TxDetailView tx={txDetail} risks={txRisks} onAddressClick={handleAddressClick} />
+          <TxDetailView tx={txDetail} risks={txRisks} alerts={txAlerts}
+            onAddressClick={handleAddressClick} onAlertClick={goToAlertCenter} />
         </div>
       ) : viewMode === 'address' && addressSummary ? (
         <div>
-          <Button type="link" onClick={() => setViewMode('home')} style={{ marginBottom: 16 }}>
+          <Button type="link" onClick={goBack} style={{ marginBottom: 16 }}>
             ← 返回
           </Button>
           <Card title={<span><LinkOutlined style={{ marginRight: 8 }} />地址概要</span>} size="small" style={{ marginBottom: 16 }}>
@@ -633,9 +650,16 @@ const TransactionExplorer: React.FC = () => {
           </Card>
         </div>
       ) : (
-        <Card title={<span><SwapOutlined style={{ marginRight: 8 }} />最近链上交易</span>} size="small">
+        <Card title={<span><SwapOutlined style={{ marginRight: 8 }} />链上交易</span>} size="small">
           {recentTxs.length > 0 ? (
-            <Table columns={txColumns} dataSource={recentTxs} rowKey="tx_hash" size="small" pagination={false} />
+            <Table columns={txColumns} dataSource={recentTxs} rowKey="tx_hash" size="small"
+              pagination={{
+                current: recentPage, total: recentTotal, pageSize: 15,
+                onChange: (p) => fetchRecent(p),
+                showTotal: (t) => `共 ${t} 笔交易`,
+                showQuickJumper: true,
+              }}
+            />
           ) : (
             <Empty description="暂无交易数据，等待 RDS 开始处理交易后自动填充" />
           )}

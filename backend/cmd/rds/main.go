@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/haswell/bcscan/internal/config"
 	_ "github.com/lib/pq"
 	"go.uber.org/zap"
 )
@@ -54,20 +55,12 @@ type Config struct {
 // loadConfig 加载配置
 func loadConfig() *Config {
 	return &Config{
-		DatabaseURL: getEnv("DATABASE_URL", "postgres://bcscan:bcscan123@localhost:5432/bcscan?sslmode=disable"),
-		KafkaBroker: getEnv("KAFKA_BROKER", "localhost:9092"),
-		KafkaTopic:  getEnv("KAFKA_TOPIC", "blockchain.transactions"),
-		RulesPath:   getEnv("RULES_PATH", "./rules/builtin"),
-		RedisAddr:   getEnv("REDIS_ADDR", "localhost:6379"),
+		DatabaseURL: config.GetEnv("DATABASE_URL", "postgres://bcscan:bcscan123@localhost:5432/bcscan?sslmode=disable"),
+		KafkaBroker: config.GetEnv("KAFKA_BROKER", "localhost:9092"),
+		KafkaTopic:  config.GetEnv("KAFKA_TOPIC", "blockchain.transactions"),
+		RulesPath:   config.GetEnv("RULES_PATH", "./rules/builtin"),
+		RedisAddr:   config.GetEnv("REDIS_ADDR", "localhost:6379"),
 	}
-}
-
-// getEnv 获取环境变量，如果不存在则返回默认值
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }
 
 // connectDatabase 连接数据库

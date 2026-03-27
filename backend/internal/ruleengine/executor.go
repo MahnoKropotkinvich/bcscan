@@ -117,7 +117,7 @@ func (e *Executor) replaceVariables(template string, ctx *EvaluationContext) str
 		result = strings.ReplaceAll(result, "{{has_delegatecall}}", fmt.Sprintf("%v", ctx.PrivilegeCheck.HasDelegatecall))
 		result = strings.ReplaceAll(result, "{{caller_authorized}}", fmt.Sprintf("%v", ctx.PrivilegeCheck.CallerAuthorized))
 		result = strings.ReplaceAll(result, "{{caller_is_contract}}", fmt.Sprintf("%v", ctx.PrivilegeCheck.CallerIsContract))
-		result = strings.ReplaceAll(result, "{{intermediary_count}}", fmt.Sprintf("%d", ctx.PrivilegeCheck.IntermediaryCount))
+		result = strings.ReplaceAll(result, "{{intermediary_count}}", fmt.Sprintf("%d", len(ctx.PrivilegeCheck.IntermediaryContracts)))
 	}
 
 	// 替换画像数据

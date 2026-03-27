@@ -40,7 +40,7 @@ func (m *Manager) Get(name string) (Hook, error) {
 }
 
 // Trigger 触发指定钩子
-func (m *Manager) Trigger(hookName string, ctx *ruleengine.EvaluationContext, rules []*ruleengine.Rule) ([]*RiskEvent, error) {
+func (m *Manager) Trigger(hookName string, ctx *ruleengine.EvaluationContext, rules []*ruleengine.Rule) ([]*DetectionResult, error) {
 	hook, err := m.Get(hookName)
 	if err != nil {
 		return nil, err

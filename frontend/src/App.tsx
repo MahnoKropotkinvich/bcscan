@@ -16,11 +16,10 @@ import {
   BlockOutlined,
 } from '@ant-design/icons';
 import Dashboard from './pages/Dashboard';
-import RiskEvents from './pages/RiskEvents';
 import RuleManagement from './pages/RuleManagement';
 import SystemStatus from './pages/SystemStatus';
 import LoginPage from './pages/LoginPage';
-import AlertManagement from './pages/AlertManagement';
+import AlertCenter from './pages/AlertCenter';
 import ReportCenter from './pages/ReportCenter';
 import UserManagement from './pages/UserManagement';
 import AuditLog from './pages/AuditLog';
@@ -42,8 +41,7 @@ interface MenuItem {
 
 const ALL_MENU_ITEMS: MenuItem[] = [
   { key: 'dashboard', path: '/', icon: <DashboardOutlined />, label: '仪表板' },
-  { key: 'risks', path: '/risks', icon: <AlertOutlined />, label: '风险事件' },
-  { key: 'alerts', path: '/alerts', icon: <BellOutlined />, label: '告警管理' },
+  { key: 'alerts', path: '/alerts', icon: <AlertOutlined />, label: '告警中心' },
   { key: 'explorer', path: '/explorer', icon: <BlockOutlined />, label: '交易浏览器' },
   { key: 'reports', path: '/reports', icon: <BarChartOutlined />, label: '报告中心' },
   { key: 'rules', path: '/rules', icon: <FileTextOutlined />, label: '规则管理', roles: ['admin', 'analyst', 'developer'] },
@@ -172,8 +170,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ user, onLogout, systemOk, pendi
           <Content style={{ background: '#fff', padding: 24, margin: 0, minHeight: 280, borderRadius: 6 }}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/risks" element={<RiskEvents />} />
-              <Route path="/alerts" element={<AlertManagement />} />
+              <Route path="/alerts" element={<AlertCenter />} />
               <Route path="/explorer" element={<TransactionExplorer />} />
               <Route path="/reports" element={<ReportCenter />} />
               <Route path="/rules" element={<RuleManagement />} />

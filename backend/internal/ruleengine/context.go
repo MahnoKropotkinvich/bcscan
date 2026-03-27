@@ -2,6 +2,8 @@ package ruleengine
 
 import (
 	"github.com/haswell/bcscan/internal/models"
+	"github.com/haswell/bcscan/internal/privilege"
+	"github.com/haswell/bcscan/internal/tracker"
 )
 
 // EvaluationContext 求值上下文，包含规则执行所需的所有数据
@@ -21,37 +23,14 @@ type EvaluationContext struct {
 
 	// ====== 跨交易上下文数据 ======
 
-	// 地址行为画像
-	SenderProfile *AddressProfileData // 发送方画像
+	// 地址行为画像（直接引用 tracker 包，消除平行结构）
+	SenderProfile *tracker.AddressProfile // 发送方画像
 
-	// 权限检查结果
-	PrivilegeCheck *PrivilegeCheckData // 权限检查
+	// 权限检查结果（直接引用 privilege 包，消除平行结构）
+	PrivilegeCheck *privilege.PrivilegeCheckResult // 权限检查
 
 	// 提取的数据（从 Extract 规则中提取）
 	ExtractedData map[string]interface{}
-}
-
-// AddressProfileData 地址画像数据（嵌入 EvaluationContext）
-type AddressProfileData struct {
-	RecentTxCount         int     // 最近窗口内的交易数
-	RecentTargetContracts int     // 最近窗口内交互的不同合约数
-	RecentTotalValue      float64 // 最近窗口内的总转账金额 (ETH)
-	RecentFailedTxCount   int     // 最近窗口内失败交易数
-	RecentCallsToContract int     // 最近窗口内对当前目标合约的调用数
-	TotalTxCount          int64   // 累计交易数
-	IsPrivileged          bool    // 是否特权地址
-}
-
-// PrivilegeCheckData 权限检查结果（嵌入 EvaluationContext）
-type PrivilegeCheckData struct {
-	IsPrivilegedCall  bool   // 是否特权调用
-	CallerAuthorized  bool   // 调用者是否被授权
-	PrivilegeLevel    string // 特权级别: critical/high/medium/low
-	RequiredRole      string // 需要的角色
-	HasDelegatecall   bool   // 调用链中是否有 delegatecall
-	CallerIsContract  bool   // 调用者是否为合约
-	IntermediaryCount int    // 中间代理合约数量
-	FunctionName      string // 特权函数名
 }
 
 // NewEvaluationContext 创建新的求值上下文
